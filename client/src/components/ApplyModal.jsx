@@ -128,9 +128,10 @@ export default function ApplyModal({ instrument, onClose, onApplied }) {
     <div className="modal-overlay" onClick={onClose}>
       <div className="modal" onClick={(e) => e.stopPropagation()}>
         <div className="modal-header">
-          <h2>
-            Apply — {instrument.name?.trim()} <span className="muted">({instrument.symbol})</span>
-          </h2>
+          <div>
+            <h2>{instrument.symbol}</h2>
+            <div className="modal-subtitle">{instrument.name?.trim()}</div>
+          </div>
           <button className="icon-btn" onClick={onClose} aria-label="Close">
             ✕
           </button>
@@ -226,44 +227,47 @@ export default function ApplyModal({ instrument, onClose, onApplied }) {
                 )}
                 {bids.map((bid, i) => (
                   <div className="bid-row" key={i}>
-                    <label>
-                      Quantity
-                      <input
-                        type="number"
-                        min={instrument.min_qty || lotSize}
-                        step={lotSize}
-                        value={bid.quantity}
-                        onChange={(e) => updateBid(i, { quantity: e.target.value })}
-                        required
-                      />
-                    </label>
-                    <label className="checkbox-label">
-                      <input
-                        type="checkbox"
-                        checked={bid.auto_cutoff}
-                        disabled={activeInvestor.cutoff_disabled}
-                        onChange={(e) => updateBid(i, { auto_cutoff: e.target.checked })}
-                      />
-                      Bid at cutoff price
-                    </label>
-                    {!bid.auto_cutoff && (
+                    <div className="bid-row-fields">
+                      <label>
+                        Quantity
+                        <input
+                          type="number"
+                          min={instrument.min_qty || lotSize}
+                          step={lotSize}
+                          value={bid.quantity}
+                          onChange={(e) => updateBid(i, { quantity: e.target.value })}
+                          required
+                        />
+                      </label>
                       <label>
                         Price
                         <input
                           type="number"
                           min={instrument.min_price}
                           max={instrument.max_price}
-                          value={bid.price}
+                          value={bid.auto_cutoff ? instrument.cutoff_price : bid.price}
+                          disabled={bid.auto_cutoff}
                           onChange={(e) => updateBid(i, { price: e.target.value })}
-                          required
+                          required={!bid.auto_cutoff}
                         />
                       </label>
-                    )}
-                    {bids.length > 1 && (
-                      <button type="button" className="icon-btn" onClick={() => removeBid(i)}>
-                        ✕
-                      </button>
-                    )}
+                    </div>
+                    <div className="bid-row-footer">
+                      <label className="checkbox-label">
+                        <input
+                          type="checkbox"
+                          checked={bid.auto_cutoff}
+                          disabled={activeInvestor.cutoff_disabled}
+                          onChange={(e) => updateBid(i, { auto_cutoff: e.target.checked })}
+                        />
+                        Bid at cutoff price
+                      </label>
+                      {bids.length > 1 && (
+                        <button type="button" className="icon-btn" onClick={() => removeBid(i)}>
+                          Remove
+                        </button>
+                      )}
+                    </div>
                   </div>
                 ))}
               </div>

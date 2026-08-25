@@ -133,8 +133,8 @@ export default function AccountsPage() {
   return (
     <div>
       <div className="toolbar">
-        <h2 className="panel-title">Zerodha Accounts</h2>
-        <button onClick={showForm ? closeForm : openAddForm}>{showForm ? 'Cancel' : '+ Add account'}</button>
+        <h2 className="panel-title">Accounts</h2>
+        <button onClick={showForm ? closeForm : openAddForm}>{showForm ? 'Cancel' : 'Add account'}</button>
       </div>
 
       {error && <div className="error" style={{ marginBottom: 16 }}>{error}</div>}

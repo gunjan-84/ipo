@@ -149,7 +149,7 @@ export default function ApplicationsList({ onGoToAccounts }) {
   return (
     <div>
       <div className="toolbar">
-        <h2 className="panel-title">My Applications</h2>
+        <h2 className="panel-title">My applications</h2>
         <button className="secondary-btn" onClick={load}>
           Refresh
         </button>
@@ -164,27 +164,27 @@ export default function ApplicationsList({ onGoToAccounts }) {
         </div>
       ) : (
         <>
-          <div className="bento-stats">
-            <div className="bento-tile bento-hero">
-              <span className="bento-value">{stats.total}</span>
-              <span className="bento-label">Total Applications</span>
+          <div className="stat-tiles">
+            <div className="stat-tile">
+              <span className="stat-label">Applications</span>
+              <span className="stat-value">{stats.total}</span>
             </div>
-            <div className="bento-tile bento-money">
-              <span className="bento-value">₹{stats.amountBlocked.toLocaleString('en-IN')}</span>
-              <span className="bento-label">Amount Blocked</span>
+            <div className="stat-tile">
+              <span className="stat-label">Amount blocked</span>
+              <span className="stat-value accent-value">₹{stats.amountBlocked.toLocaleString('en-IN')}</span>
             </div>
             {statuses.map((s) => (
-              <div className="bento-tile" key={s}>
-                <span className="bento-value">{stats.byStatus[s] || 0}</span>
-                <span className="bento-label">{titleCase(s)}</span>
+              <div className="stat-tile" key={s}>
+                <span className="stat-label">{titleCase(s)}</span>
+                <span className="stat-value">{stats.byStatus[s] || 0}</span>
               </div>
             ))}
           </div>
 
           <div className="filters-bar">
-            <div className="tabs">
+            <div className="segment">
               <button
-                className={`tab-btn ${statusFilter === 'all' ? 'active' : ''}`}
+                className={`segment-btn ${statusFilter === 'all' ? 'active' : ''}`}
                 onClick={() => setStatusFilter('all')}
               >
                 All
@@ -192,7 +192,7 @@ export default function ApplicationsList({ onGoToAccounts }) {
               {statuses.map((s) => (
                 <button
                   key={s}
-                  className={`tab-btn ${statusFilter === s ? 'active' : ''}`}
+                  className={`segment-btn ${statusFilter === s ? 'active' : ''}`}
                   onClick={() => setStatusFilter(s)}
                 >
                   {titleCase(s)}

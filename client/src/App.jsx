@@ -4,11 +4,12 @@ import AccountsPage from './components/AccountsPage';
 import UpisPage from './components/UpisPage';
 import IpoList from './components/IpoList';
 import ApplicationsList from './components/ApplicationsList';
+import ThemeToggle from './components/ThemeToggle';
 import './App.css';
 
 const TABS = [
   { key: 'ipos', label: 'IPOs' },
-  { key: 'applications', label: 'My Applications' },
+  { key: 'applications', label: 'Applications' },
   { key: 'accounts', label: 'Accounts' },
   { key: 'upis', label: 'UPI IDs' },
 ];
@@ -26,20 +27,24 @@ export default function App() {
   return (
     <div className="page">
       <header className="app-header">
-        <div className="brand">Kite IPO</div>
+        <div className="brand">
+          <span className="brand-ez">EZ</span> <span className="brand-ipo">IPO</span>
+        </div>
+        <nav className="main-tabs">
+          {TABS.map((t) => (
+            <button
+              key={t.key}
+              className={`tab-btn ${tab === t.key ? 'active' : ''}`}
+              onClick={() => setTab(t.key)}
+            >
+              {t.label}
+            </button>
+          ))}
+        </nav>
+        <div className="header-right">
+          <ThemeToggle />
+        </div>
       </header>
-
-      <nav className="main-tabs">
-        {TABS.map((t) => (
-          <button
-            key={t.key}
-            className={`tab-btn ${tab === t.key ? 'active' : ''}`}
-            onClick={() => setTab(t.key)}
-          >
-            {t.label}
-          </button>
-        ))}
-      </nav>
 
       <main className="content">
         {tab === 'ipos' && <IpoList onGoToAccounts={() => setTab('accounts')} />}

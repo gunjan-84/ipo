@@ -62,7 +62,7 @@ export default function UpisPage() {
     <div>
       <div className="toolbar">
         <h2 className="panel-title">UPI IDs</h2>
-        <button onClick={() => setShowForm((s) => !s)}>{showForm ? 'Cancel' : '+ Add UPI ID'}</button>
+        <button onClick={() => setShowForm((s) => !s)}>{showForm ? 'Cancel' : 'Add UPI ID'}</button>
       </div>
 
       <p className="subtitle" style={{ textAlign: 'left', marginBottom: 16 }}>

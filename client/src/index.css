@@ -1,48 +1,122 @@
 :root {
-  --text: #4b4b52;
-  --text-h: #0f0f13;
-  --bg: #f7f7f9;
+  --bg: #f4f6f9;
   --surface: #ffffff;
-  --border: #e3e3e8;
-  --accent: #16a34a;
-  --accent-hover: #15803d;
-  --accent-bg: rgba(22, 163, 74, 0.1);
-  --accent-solid: #16a34a;
-  --accent-solid-hover: #15803d;
-  --danger: #d92d20;
-  --danger-bg: rgba(217, 45, 32, 0.08);
-  --success: #0d8a5f;
-  --success-bg: rgba(13, 138, 95, 0.08);
-  --shadow: rgba(0, 0, 0, 0.08) 0 1px 3px, rgba(0, 0, 0, 0.06) 0 1px 2px;
+  --surface-hover: #fbfcfe;
+  --text-h: #10161f;
+  --text: #5a6675;
+  --muted: #93a0b0;
+  --muted-2: #7b8798;
+  --border: #e2e7ee;
+  --border-soft: #eef1f6;
+  --border-strong: #cfd7e1;
+  --track: #dbe2ec;
+  --seg-bg: #eaeef4;
+  --rail: #e6eaf1;
+  --dot-border: #d7dfe9;
+  --accent: #1f3f73;
+  --accent-hover: #16305a;
+  --accent-soft: rgba(31, 63, 115, 0.09);
+  --on-accent: #ffffff;
+  --ok: #12735a;
+  --ok-soft: rgba(18, 115, 90, 0.09);
+  --warn: #8a5200;
+  --warn-soft: rgba(154, 91, 0, 0.09);
+  --warn-ring: rgba(154, 91, 0, 0.14);
+  --danger: #a52c22;
+  --danger-soft: rgba(165, 44, 34, 0.06);
+  --danger-border: #e6d5d3;
+  --sme: #6b5b95;
+  --sme-border: #d8d2e6;
+  --overlay: rgba(16, 22, 31, 0.4);
+  --shadow: rgba(16, 22, 31, 0.06);
 
-  --sans: system-ui, 'Segoe UI', Roboto, sans-serif;
+  --sans: 'Instrument Sans', system-ui, 'Segoe UI', Roboto, sans-serif;
 
   font: 15px/1.5 var(--sans);
-  color-scheme: light dark;
   color: var(--text);
   background: var(--bg);
   -webkit-font-smoothing: antialiased;
   -moz-osx-font-smoothing: grayscale;
 }
 
+input, select, textarea {
+  color-scheme: light dark;
+}
+
+:root[data-theme='light'] {
+  color-scheme: light;
+}
+
+:root[data-theme='dark'] {
+  color-scheme: dark;
+}
+
 @media (prefers-color-scheme: dark) {
-  :root {
-    --text: #b8b8c2;
-    --text-h: #f3f4f6;
-    --bg: #12131a;
-    --surface: #1a1b24;
-    --border: #2b2c37;
-    --accent: #34d399;
-    --accent-hover: #4ade80;
-    --accent-bg: rgba(52, 211, 153, 0.15);
-    --accent-solid: #16a34a;
-    --accent-solid-hover: #22c55e;
-    --danger: #f97066;
-    --danger-bg: rgba(249, 112, 102, 0.12);
-    --success: #3ccb96;
-    --success-bg: rgba(60, 203, 150, 0.12);
-    --shadow: rgba(0, 0, 0, 0.5) 0 1px 3px, rgba(0, 0, 0, 0.4) 0 1px 2px;
+  :root:not([data-theme='light']) {
+    --bg: #0d1117;
+    --surface: #151b24;
+    --surface-hover: #1a212b;
+    --text-h: #e8edf4;
+    --text: #a3b0c0;
+    --muted: #6f7d8f;
+    --muted-2: #8695a6;
+    --border: #232c38;
+    --border-soft: #1d2530;
+    --border-strong: #2e3a48;
+    --track: #2a3440;
+    --seg-bg: #1d2530;
+    --rail: #232c38;
+    --dot-border: #364250;
+    --accent: #6f9bdc;
+    --accent-hover: #8fb3e8;
+    --accent-soft: rgba(111, 155, 220, 0.16);
+    --on-accent: #0d1117;
+    --ok: #3ecfa0;
+    --ok-soft: rgba(62, 207, 160, 0.14);
+    --warn: #e0a458;
+    --warn-soft: rgba(224, 164, 88, 0.14);
+    --warn-ring: rgba(224, 164, 88, 0.22);
+    --danger: #f08a7e;
+    --danger-soft: rgba(240, 138, 126, 0.12);
+    --danger-border: #46302e;
+    --sme: #b9a6e8;
+    --sme-border: #3a3352;
+    --overlay: rgba(0, 0, 0, 0.6);
+    --shadow: rgba(0, 0, 0, 0.4);
   }
+}
+
+:root[data-theme='dark'] {
+  --bg: #0d1117;
+  --surface: #151b24;
+  --surface-hover: #1a212b;
+  --text-h: #e8edf4;
+  --text: #a3b0c0;
+  --muted: #6f7d8f;
+  --muted-2: #8695a6;
+  --border: #232c38;
+  --border-soft: #1d2530;
+  --border-strong: #2e3a48;
+  --track: #2a3440;
+  --seg-bg: #1d2530;
+  --rail: #232c38;
+  --dot-border: #364250;
+  --accent: #6f9bdc;
+  --accent-hover: #8fb3e8;
+  --accent-soft: rgba(111, 155, 220, 0.16);
+  --on-accent: #0d1117;
+  --ok: #3ecfa0;
+  --ok-soft: rgba(62, 207, 160, 0.14);
+  --warn: #e0a458;
+  --warn-soft: rgba(224, 164, 88, 0.14);
+  --warn-ring: rgba(224, 164, 88, 0.22);
+  --danger: #f08a7e;
+  --danger-soft: rgba(240, 138, 126, 0.12);
+  --danger-border: #46302e;
+  --sme: #b9a6e8;
+  --sme-border: #3a3352;
+  --overlay: rgba(0, 0, 0, 0.6);
+  --shadow: rgba(0, 0, 0, 0.4);
 }
 
 * {
@@ -59,6 +133,7 @@ body {
 
 h1, h2, h3 {
   font-weight: 600;
+  letter-spacing: -0.02em;
   color: var(--text-h);
   margin: 0;
 }

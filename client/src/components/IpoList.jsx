@@ -2,45 +2,11 @@ import { useEffect, useState } from 'react';
 import { api } from '../api';
 import ApplyModal from './ApplyModal';
 
-function ordinalSuffix(n) {
-  const v = n % 100;
-  if (v >= 11 && v <= 13) return 'th';
-  switch (n % 10) {
-    case 1:
-      return 'st';
-    case 2:
-      return 'nd';
-    case 3:
-      return 'rd';
-    default:
-      return 'th';
-  }
-}
+const DAY_MS = 86400000;
 
-function ordinalDay(dateStr) {
-  if (!dateStr) return null;
-  const d = new Date(dateStr.split(' ')[0]);
-  const day = d.getDate();
-  return { day, suffix: ordinalSuffix(day), month: d.toLocaleDateString('en-US', { month: 'short' }) };
-}
-
-function formatDateRange(startStr, endStr) {
-  const start = ordinalDay(startStr);
-  const end = ordinalDay(endStr);
-  if (!start || !end) return '—';
-  return (
-    <>
-      {start.day}
-      <sup>{start.suffix}</sup>
-      {start.month !== end.month && ` ${start.month}`} — {end.day}
-      <sup>{end.suffix}</sup> {end.month}
-    </>
-  );
-}
-
-function formatShortDate(dateStr) {
+function fmtDayMonth(dateStr) {
   if (!dateStr) return '—';
-  return dateStr.split(' ')[0].split('T')[0];
+  return new Date(dateStr.split(' ')[0]).toLocaleDateString('en-GB', { day: 'numeric', month: 'short' });
 }
 
 function ipojiLink(instrument) {
@@ -53,36 +19,59 @@ function ipojiLink(instrument) {
   return `https://www.ipoji.com/ipo/${slug}-ipo`;
 }
 
-function IpoTimeline({ instrument }) {
-  const milestones = [
-    { key: 'start_at', label: 'Offer start' },
-    { key: 'end_at', label: 'Offer end' },
-    { key: 'allotment_finalisation_date', label: 'Allotment' },
-    { key: 'refund_initiation_date', label: 'Refund initiation' },
-    { key: 'demat_transfer_date', label: 'Demat transfer' },
-    { key: 'listing_date', label: 'Listing' },
-    { key: 'mandate_end_date', label: 'Mandate end' },
-  ]
-    .map((m) => ({ ...m, date: instrument[m.key] ? new Date(instrument[m.key].split(' ')[0]) : null }))
-    .filter((m) => m.date);
+function daysLeftInfo(endAt, today) {
+  const days = Math.ceil((new Date(endAt.split(' ')[0]) - today) / DAY_MS);
+  const label = days < 0 ? '' : days === 0 ? 'Last day' : days === 1 ? '1d left' : `${days}d left`;
+  return { label, urgent: days <= 1 };
+}
 
-  if (milestones.length < 2) return null;
+// Two-column vertical stepper: one dot+connector per milestone, "Today" called out inline.
+function buildSteps(ins, today) {
+  const d = (key) => (ins[key] ? new Date(ins[key].split(' ')[0]) : null);
+  const sameDay = (a, b) => a && b && a.toDateString() === b.toDateString();
+  const defs = [
+    ['Offer opened', d('start_at')],
+    ['Offer closes', d('end_at')],
+    ['Allotment finalised', d('allotment_finalisation_date')],
+    ['Refund initiated', d('refund_initiation_date')],
+    ['Shares in demat', d('demat_transfer_date')],
+    ['Lists · mandate ends', d('listing_date'), d('mandate_end_date')],
+  ];
+  if (defs.some(([, dt]) => !dt)) return null;
 
-  const today = new Date();
-  const first = milestones[0].date;
-  const last = milestones[milestones.length - 1].date;
-  const span = last - first;
-  const fillPercent = span > 0 ? Math.min(100, Math.max(0, ((today - first) / span) * 100)) : 0;
+  return defs.map(([label, dt, dt2], i, arr) => ({
+    label,
+    date: dt2 ? `${fmtShort(dt)} · ${fmtShort(dt2)}` : fmtShort(dt),
+    isToday: sameDay(dt, today),
+    done: dt <= today,
+    isLast: i === arr.length - 1,
+  }));
+}
+
+function fmtShort(date) {
+  return date.toLocaleDateString('en-GB', { day: 'numeric', month: 'short' });
+}
+
+function IpoTimeline({ instrument, today }) {
+  const steps = buildSteps(instrument, today);
+  if (!steps) return null;
 
   return (
     <div className="ipo-timeline">
-      <div className="ipo-timeline-track">
-        <div className="ipo-timeline-fill" style={{ width: `${fillPercent}%` }} />
-        {milestones.map((m) => (
-          <div className="ipo-timeline-point" key={m.key}>
-            <span className={`ipo-timeline-dot ${m.date <= today ? 'reached' : ''}`} />
-            <span className="ipo-timeline-label">{m.label}</span>
-            <span className="ipo-timeline-date">{formatShortDate(instrument[m.key])}</span>
+      <div className="ipo-stepper-grid">
+        {steps.map((st, i) => (
+          <div className="ipo-step" key={i}>
+            <div className="ipo-step-rail">
+              <span className={`ipo-step-dot ${st.isToday ? 'today' : st.done ? 'done' : ''}`} />
+              {!st.isLast && <span className="ipo-step-conn" data-done={st.done} />}
+            </div>
+            <div className="ipo-step-body">
+              <div className="ipo-step-heading">
+                <span className="ipo-step-label">{st.label}</span>
+                {st.isToday && <span className="today-chip">Today</span>}
+              </div>
+              <div className="ipo-step-date">{st.date}</div>
+            </div>
           </div>
         ))}
       </div>
@@ -90,24 +79,54 @@ function IpoTimeline({ instrument }) {
   );
 }
 
-function IpoRow({ instrument: ins, onApply }) {
+function IpoRow({ instrument: ins, closed, today, onApply }) {
   const [expanded, setExpanded] = useState(false);
+  const days = closed ? null : daysLeftInfo(ins.end_at, today);
 
   return (
     <div className="ipo-row-wrap">
       <div className="ipo-row" onClick={() => setExpanded((e) => !e)}>
         <div className="ipo-row-col ipo-row-instrument">
           <div className="ipo-row-symbol">
-            {ins.symbol}
+            <span>{ins.symbol}</span>
             <span className={`type-tag ${ins.sub_type === 'SME' ? 'type-tag-sme' : 'type-tag-ipo'}`}>
-              {ins.sub_type === 'SME' ? 'SME IPO' : 'Normal IPO'}
+              {ins.sub_type === 'SME' ? 'SME' : 'MAIN'}
             </span>
-            {ins.status !== 'ongoing' && <span className="status-badge status-closed">{ins.status}</span>}
           </div>
           <div className="ipo-row-name">{ins.name?.trim()}</div>
         </div>
 
         <div className="ipo-row-col ipo-row-date">
+          <span>
+            {fmtDayMonth(ins.start_at)} – {fmtDayMonth(ins.end_at)}
+          </span>
+          {!closed && days?.label && (
+            <span className={`days-pill ${days.urgent ? 'urgent' : ''}`}>{days.label}</span>
+          )}
+        </div>
+
+        <div className="ipo-row-col ipo-row-price">
+          ₹{ins.min_price} – {ins.max_price}
+        </div>
+
+        <div className="ipo-row-col ipo-row-amount">
+          <div className="ipo-row-amount-value">₹{ins.min_investment_amount?.toLocaleString('en-IN')}</div>
+          <div className="ipo-row-amount-qty">{ins.min_qty} qty</div>
+        </div>
+
+        <div className="ipo-row-col ipo-row-action" onClick={(e) => e.stopPropagation()}>
+          {closed ? (
+            <span className="closed-note">Listed {fmtDayMonth(ins.listing_date)}</span>
+          ) : (
+            <>
+              <a href={ipojiLink(ins)} target="_blank" rel="noreferrer" className="ipo-row-details">
+                Details
+              </a>
+              <button disabled={ins.status !== 'ongoing' || !ins.active} onClick={() => onApply(ins)}>
+                Apply
+              </button>
+            </>
+          )}
           <button
             type="button"
             className={`ipo-expand-btn ${expanded ? 'expanded' : ''}`}
@@ -119,29 +138,10 @@ function IpoRow({ instrument: ins, onApply }) {
           >
             ▾
           </button>
-          <span>{formatDateRange(ins.start_at, ins.end_at)}</span>
-        </div>
-
-        <div className="ipo-row-col ipo-row-price">
-          {ins.min_price} - {ins.max_price}
-        </div>
-
-        <div className="ipo-row-col ipo-row-amount">
-          <div className="ipo-row-amount-value">{ins.min_investment_amount?.toLocaleString('en-IN')}</div>
-          <div className="ipo-row-amount-qty">{ins.min_qty} Qty.</div>
-        </div>
-
-        <div className="ipo-row-col ipo-row-action" onClick={(e) => e.stopPropagation()}>
-          <a href={ipojiLink(ins)} target="_blank" rel="noreferrer" className="ipo-row-details">
-            Details
-          </a>
-          <button disabled={ins.status !== 'ongoing' || !ins.active} onClick={() => onApply(ins)}>
-            Apply
-          </button>
         </div>
       </div>
 
-      {expanded && <IpoTimeline instrument={ins} />}
+      {expanded && <IpoTimeline instrument={ins} today={today} />}
     </div>
   );
 }
@@ -150,7 +150,6 @@ export default function IpoList({ onGoToAccounts }) {
   const [instruments, setInstruments] = useState([]);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState('');
-  const [filter, setFilter] = useState('ongoing');
   const [typeFilter, setTypeFilter] = useState('all');
   const [sortOrder, setSortOrder] = useState('closing-soon');
   const [selected, setSelected] = useState(null);
@@ -172,17 +171,6 @@ export default function IpoList({ onGoToAccounts }) {
     load();
   }, []);
 
-  const filtered = instruments
-    .filter((i) => {
-      if (filter !== 'all' && i.status !== filter) return false;
-      if (typeFilter !== 'all' && i.sub_type !== typeFilter) return false;
-      return true;
-    })
-    .sort((a, b) => {
-      const diff = new Date(a.end_at) - new Date(b.end_at);
-      return sortOrder === 'closing-soon' ? diff : -diff;
-    });
-
   if (loading) return <div className="panel-loading">Loading IPOs…</div>;
   if (error) {
     return (
@@ -193,39 +181,49 @@ export default function IpoList({ onGoToAccounts }) {
     );
   }
 
+  const today = new Date();
+  const pool = instruments.filter((i) => typeFilter === 'all' || i.sub_type === typeFilter);
+
+  const bySort = (a, b) => {
+    const diff = new Date(a.end_at) - new Date(b.end_at);
+    return sortOrder === 'closing-soon' ? diff : -diff;
+  };
+  const open = pool.filter((i) => i.status === 'ongoing').sort(bySort);
+  const closed = pool.filter((i) => i.status !== 'ongoing').sort((a, b) => new Date(b.end_at) - new Date(a.end_at));
+
+  const soonest = open.length ? Math.ceil((new Date(open[0].end_at) - today) / DAY_MS) : null;
+  const openSummary =
+    open.length === 0
+      ? 'No issues open right now'
+      : `${open.length} ${open.length === 1 ? 'issue' : 'issues'} open` +
+        (soonest === 0 ? ' · one closes today' : soonest === 1 ? ' · one closes tomorrow' : ` · next closes in ${soonest} days`);
+
   return (
     <div>
-      <div className="filters-bar">
-        <div className="tabs">
-          {['ongoing', 'closed', 'all'].map((f) => (
-            <button
-              key={f}
-              className={`tab-btn ${filter === f ? 'active' : ''}`}
-              onClick={() => setFilter(f)}
-            >
-              {f[0].toUpperCase() + f.slice(1)}
-            </button>
-          ))}
-        </div>
-        <div className="tabs">
-          {[
-            { key: 'all', label: 'All IPO types' },
-            { key: 'IPO', label: 'Normal IPO' },
-            { key: 'SME', label: 'SME IPO' },
-          ].map((t) => (
-            <button
-              key={t.key}
-              className={`tab-btn ${typeFilter === t.key ? 'active' : ''}`}
-              onClick={() => setTypeFilter(t.key)}
-            >
-              {t.label}
-            </button>
-          ))}
+      <div className="ipo-page-header">
+        <div>
+          <h1>Public issues</h1>
+          <p className="ipo-page-summary">{openSummary}</p>
         </div>
         <div className="filters-right">
+          <div className="segment">
+            {[
+              { key: 'all', label: 'All' },
+              { key: 'IPO', label: 'Mainboard' },
+              { key: 'SME', label: 'SME' },
+            ].map((t) => (
+              <button
+                key={t.key}
+                className={`segment-btn ${typeFilter === t.key ? 'active' : ''}`}
+                onClick={() => setTypeFilter(t.key)}
+              >
+                {t.label}
+              </button>
+            ))}
+          </div>
           <select value={sortOrder} onChange={(e) => setSortOrder(e.target.value)}>
-            <option value="closing-soon">Closing soon first</option>
-            <option value="closing-later">Closing later first</option>
+            <option value="closing-soon">Closing soon</option>
+            <option value="closing-later">Closing later</option>
           </select>
           <button className="secondary-btn" onClick={load}>
             Refresh
@@ -233,21 +231,34 @@ export default function IpoList({ onGoToAccounts }) {
         </div>
       </div>
 
-      {filtered.length === 0 ? (
-        <div className="empty-state">No IPOs in this category.</div>
-      ) : (
-        <div className="ipo-list">
-          <div className="ipo-row ipo-row-header">
-            <div className="ipo-row-col ipo-row-instrument">Instrument</div>
-            <div className="ipo-row-col ipo-row-date">Date</div>
-            <div className="ipo-row-col ipo-row-price">Price (₹)</div>
-            <div className="ipo-row-col ipo-row-amount">Min. amount (₹)</div>
-            <div className="ipo-row-col ipo-row-action"></div>
-          </div>
-          {filtered.map((ins) => (
-            <IpoRow key={ins.id} instrument={ins} onApply={setSelected} />
-          ))}
+      <section className="ipo-section">
+        <div className="ipo-section-heading">
+          <h2>Open now</h2>
+          <span className="ipo-section-count">{open.length}</span>
         </div>
+        {open.length === 0 ? (
+          <div className="empty-state">No open issues match this filter.</div>
+        ) : (
+          <div className="ipo-list">
+            {open.map((ins) => (
+              <IpoRow key={ins.id} instrument={ins} closed={false} today={today} onApply={setSelected} />
+            ))}
+          </div>
+        )}
+      </section>
+
+      {closed.length > 0 && (
+        <section className="ipo-section">
+          <div className="ipo-section-heading">
+            <h2 className="muted-heading">Closed</h2>
+            <span className="ipo-section-count">{closed.length}</span>
+          </div>
+          <div className="ipo-list">
+            {closed.map((ins) => (
+              <IpoRow key={ins.id} instrument={ins} closed today={today} onApply={setSelected} />
+            ))}
+          </div>
+        </section>
       )}
 
       {selected && (
