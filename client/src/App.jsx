@@ -6,6 +6,7 @@ import PansPage from './components/PansPage';
 import IpoList from './components/IpoList';
 import ApplicationsList from './components/ApplicationsList';
 import AllotmentCheck from './components/AllotmentCheck';
+import GrowwPage from './components/GrowwPage';
 import ThemeToggle from './components/ThemeToggle';
 import './App.css';
 
@@ -16,6 +17,7 @@ const TABS = [
   { key: 'accounts', label: 'Accounts' },
   { key: 'upis', label: 'UPI IDs' },
   { key: 'pans', label: 'PAN Numbers' },
+  { key: 'groww', label: 'Groww' },
 ];
 
 export default function App() {
@@ -57,6 +59,7 @@ export default function App() {
         {tab === 'accounts' && <AccountsPage />}
         {tab === 'upis' && <UpisPage />}
         {tab === 'pans' && <PansPage />}
+        {tab === 'groww' && <GrowwPage />}
       </main>
     </div>
   );

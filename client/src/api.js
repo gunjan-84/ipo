@@ -41,4 +41,10 @@ export const api = {
   listRegistryIpos: () => request('/ipo/registry'),
   checkAllotment: (clientId, registrar) =>
     request(`/ipo/allotment?client_id=${encodeURIComponent(clientId)}&registrar=${encodeURIComponent(registrar)}`),
+
+  listGrowwAccounts: () => request('/groww/accounts'),
+  addGrowwAccount: (payload) => request('/groww/accounts', { method: 'POST', body: JSON.stringify(payload) }),
+  updateGrowwAccount: (id, payload) => request(`/groww/accounts/${id}`, { method: 'PUT', body: JSON.stringify(payload) }),
+  deleteGrowwAccount: (id) => request(`/groww/accounts/${id}`, { method: 'DELETE' }),
+  getGrowwOrders: (id) => request(`/groww/accounts/${id}/orders`),
 };

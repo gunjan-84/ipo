@@ -10,6 +10,8 @@ from fastapi.responses import JSONResponse
 
 import accounts_store
 import connections_store
+import groww_client
+import groww_store
 import kfintech_store
 import mufg_store
 import pan_store
@@ -34,6 +36,7 @@ accounts = accounts_store.load()  # [{id, label, user_id, password, totp_secret}
 upis = upi_store.load()  # [{id, upi_id, label}]
 pans = pan_store.load()  # [{id, pan, label}] — shared PAN list, used for allotment checks
 kfintech_store.load()  # [{name, value}] — KFintech's "Select IPO" dropdown, scraped from ipostatus.kfintech.com
+groww_accounts = groww_store.load()  # [{id, label, bearer_token, device_id, nkey, pin, pin_token}]
 
 
 @app.middleware("http")
@@ -597,3 +600,111 @@ async def check_allotment(client_id: str, registrar: str = REGISTRAR_KFINTECH):
     pan_store.save(pans)
     log.info(f"allotment check: registrar={registrar} client_id={client_id} -> {len(results)} pan(s)")
     return {"status": "success", "data": results}
+
+
+# --- Groww: bearer_token/device_id/nkey are captured once via a manual browser login
+# (done outside this app — see create_session.py) and pasted in here; from then on the
+# PIN alone lets us silently refresh access (see groww_client.unlock_pin), so the user
+# never has to repeat that browser login just to keep pulling their IPO orders. ---
+def find_groww_account(account_id: str):
+    return next((a for a in groww_accounts if a["id"] == account_id), None)
+
+
+def public_groww_account(a: dict) -> dict:
+    return {"id": a["id"], "label": a["label"], "connected": bool(a.get("pin_token"))}
+
+
+@app.get("/api/groww/accounts")
+async def list_groww_accounts():
+    return {"status": "success", "data": [public_groww_account(a) for a in groww_accounts]}
+
+
+@app.post("/api/groww/accounts")
+async def add_groww_account(payload: dict):
+    label = (payload.get("label") or "").strip()
+    bearer_token = (payload.get("bearer_token") or "").strip()
+    device_id = (payload.get("device_id") or "").strip()
+    nkey = (payload.get("nkey") or "").strip()
+    pin = (payload.get("pin") or "").strip()
+    if not bearer_token or not device_id or not nkey or not pin:
+        return JSONResponse(
+            status_code=400,
+            content={"status": "error", "message": "bearer_token, device_id, nkey and pin are required"},
+        )
+
+    account = {
+        "id": str(uuid.uuid4()),
+        "label": label or "Groww",
+        "bearer_token": bearer_token,
+        "device_id": device_id,
+        "nkey": nkey,
+        "pin": pin,
+        "pin_token": None,
+    }
+    groww_accounts.append(account)
+    groww_store.save(groww_accounts)
+    log.info(f"groww account added: {account['label']}")
+    return {"status": "success", "data": public_groww_account(account)}
+
+
+# Lets the user paste fresh bearer_token/device_id/nkey after re-running the browser
+# login (e.g. once the old JWT finally expires), without losing the account's id/label/PIN.
+@app.put("/api/groww/accounts/{account_id}")
+async def update_groww_account(account_id: str, payload: dict):
+    account = find_groww_account(account_id)
+    if not account:
+        return JSONResponse(status_code=404, content={"status": "error", "message": "Account not found"})
+
+    label = payload.get("label")
+    bearer_token = payload.get("bearer_token")
+    device_id = payload.get("device_id")
+    nkey = payload.get("nkey")
+    pin = payload.get("pin")
+
+    if label:
+        account["label"] = label.strip()
+    if bearer_token:
+        account["bearer_token"] = bearer_token.strip()
+    if device_id:
+        account["device_id"] = device_id.strip()
+    if nkey:
+        account["nkey"] = nkey.strip()
+    if pin:
+        account["pin"] = pin.strip()
+    if bearer_token or device_id or nkey or pin:
+        account["pin_token"] = None  # force a fresh unlock next fetch
+
+    groww_store.save(groww_accounts)
+    log.info(f"groww account updated: {account['label']} ({account_id})")
+    return {"status": "success", "data": public_groww_account(account)}
+
+
+@app.delete("/api/groww/accounts/{account_id}")
+async def delete_groww_account(account_id: str):
+    global groww_accounts
+    groww_accounts = [a for a in groww_accounts if a["id"] != account_id]
+    groww_store.save(groww_accounts)
+    log.info(f"groww account deleted: {account_id}")
+    return {"status": "success"}
+
+
+# Orchestrates the full sequence: fetch with the stored pin_token, transparently
+# unlocking a fresh one from the stored PIN if it's expired, then retrying once.
+@app.get("/api/groww/accounts/{account_id}/orders")
+async def get_groww_orders(account_id: str):
+    account = find_groww_account(account_id)
+    if not account:
+        return JSONResponse(status_code=404, content={"status": "error", "message": "Account not found"})
+
+    try:
+        orders, refreshed_pin_token = await groww_client.fetch_orders_with_auto_unlock(account)
+    except Exception as err:
+        log.exception(f"groww fetch failed for {account['label']}")
+        return JSONResponse(status_code=502, content={"status": "error", "message": str(err)})
+
+    if refreshed_pin_token:
+        account["pin_token"] = refreshed_pin_token
+        groww_store.save(groww_accounts)
+        log.info(f"groww PIN token refreshed for {account['label']}")
+
+    return {"status": "success", "data": orders}
