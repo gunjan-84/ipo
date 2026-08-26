@@ -2,16 +2,20 @@ import { useEffect, useState } from 'react';
 import { api } from './api';
 import AccountsPage from './components/AccountsPage';
 import UpisPage from './components/UpisPage';
+import PansPage from './components/PansPage';
 import IpoList from './components/IpoList';
 import ApplicationsList from './components/ApplicationsList';
+import AllotmentCheck from './components/AllotmentCheck';
 import ThemeToggle from './components/ThemeToggle';
 import './App.css';
 
 const TABS = [
   { key: 'ipos', label: 'IPOs' },
   { key: 'applications', label: 'Applications' },
+  { key: 'allotment', label: 'Check Allotment' },
   { key: 'accounts', label: 'Accounts' },
   { key: 'upis', label: 'UPI IDs' },
+  { key: 'pans', label: 'PAN Numbers' },
 ];
 
 export default function App() {
@@ -49,8 +53,10 @@ export default function App() {
       <main className="content">
         {tab === 'ipos' && <IpoList onGoToAccounts={() => setTab('accounts')} />}
         {tab === 'applications' && <ApplicationsList onGoToAccounts={() => setTab('accounts')} />}
+        {tab === 'allotment' && <AllotmentCheck onGoToPans={() => setTab('pans')} />}
         {tab === 'accounts' && <AccountsPage />}
         {tab === 'upis' && <UpisPage />}
+        {tab === 'pans' && <PansPage />}
       </main>
     </div>
   );

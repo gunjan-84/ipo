@@ -17,7 +17,8 @@
   margin-bottom: 20px;
 }
 
-label {
+label,
+.field-label {
   display: flex;
   flex-direction: column;
   gap: 6px;
@@ -39,6 +40,90 @@ input, select {
 input:focus, select:focus {
   outline: 2px solid var(--accent-soft);
   border-color: var(--accent);
+}
+
+/* Searchable select: a trigger button + an absolutely-positioned panel with its own search box. */
+.searchable-select {
+  position: relative;
+  width: 100%;
+}
+
+.searchable-select-trigger {
+  width: 100%;
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px;
+  font: inherit;
+  font-weight: 400;
+  padding: 9px 11px;
+  border: 1px solid var(--border);
+  border-radius: 8px;
+  background: var(--surface);
+  color: var(--text-h);
+  text-align: left;
+}
+
+.searchable-select-trigger:hover {
+  background: var(--surface);
+  border-color: var(--accent);
+}
+
+.searchable-select-placeholder {
+  color: var(--muted);
+}
+
+.searchable-select-chevron {
+  color: var(--muted);
+  flex-shrink: 0;
+}
+
+.searchable-select-panel {
+  position: absolute;
+  top: calc(100% + 6px);
+  left: 0;
+  right: 0;
+  z-index: 20;
+  background: var(--surface);
+  border: 1px solid var(--border);
+  border-radius: 10px;
+  box-shadow: 0 12px 24px rgba(0, 0, 0, 0.25);
+  overflow: hidden;
+}
+
+.searchable-select-search {
+  width: 100%;
+  border: none;
+  border-bottom: 1px solid var(--border);
+  border-radius: 0;
+}
+
+.searchable-select-search:focus {
+  outline: none;
+  border-color: var(--border);
+}
+
+.searchable-select-list {
+  max-height: 260px;
+  overflow-y: auto;
+}
+
+.searchable-select-option {
+  padding: 9px 12px;
+  font-size: 13px;
+  cursor: pointer;
+}
+
+.searchable-select-option:hover,
+.searchable-select-option.active {
+  background: var(--accent-soft);
+  color: var(--accent);
+}
+
+.searchable-select-empty {
+  padding: 12px;
+  font-size: 13px;
+  color: var(--muted);
 }
 
 button {
@@ -98,6 +183,12 @@ a.secondary-btn:hover {
   border: none;
   padding: 4px 8px;
   font-size: 14px;
+}
+
+/* Action buttons (Edit/Rename/Delete) carry both a text and icon span; the icon only
+   shows once mobile styles collapse the button to icon-only (see the 640px media query). */
+.btn-icon {
+  display: none;
 }
 
 .link-btn {
@@ -219,6 +310,11 @@ a.secondary-btn:hover {
   flex: 1;
   padding: 28px 40px;
   width: 100%;
+}
+
+.centered-panel {
+  max-width: 720px;
+  margin: 0 auto;
 }
 
 .toolbar {
@@ -614,6 +710,26 @@ a.secondary-btn:hover {
 .status-app-cancelled {
   background: var(--border);
   color: var(--text);
+}
+
+.status-pill-not-applied {
+  background: var(--border);
+  color: var(--text);
+}
+
+.status-pill-not-allotted {
+  background: var(--danger-soft);
+  color: var(--danger);
+}
+
+.status-pill-allotted {
+  background: var(--ok-soft);
+  color: var(--ok);
+}
+
+.status-pill-error {
+  background: var(--danger-soft);
+  color: var(--danger);
 }
 
 /* Applications table */
@@ -1057,17 +1173,28 @@ a.secondary-btn:hover {
   }
 
   .account-row {
-    flex-wrap: wrap;
     gap: 10px;
   }
 
   .account-actions {
-    flex-wrap: wrap;
-    width: 100%;
+    flex-shrink: 0;
+    gap: 6px;
   }
 
   .account-actions button {
-    flex: 1;
+    padding: 8px;
+    min-width: 36px;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+  }
+
+  .btn-text {
+    display: none;
+  }
+
+  .btn-icon {
+    display: inline;
   }
 
   .account-form {

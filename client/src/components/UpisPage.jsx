@@ -59,7 +59,7 @@ export default function UpisPage() {
   if (loading) return <div className="panel-loading">Loading UPI IDs…</div>;
 
   return (
-    <div>
+    <div className="centered-panel">
       <div className="toolbar">
         <h2 className="panel-title">UPI IDs</h2>
         <button onClick={() => setShowForm((s) => !s)}>{showForm ? 'Cancel' : 'Add UPI ID'}</button>
@@ -116,7 +116,8 @@ export default function UpisPage() {
               </div>
               <div className="account-actions">
                 <button className="danger-btn" disabled={busyId === u.id} onClick={() => handleDelete(u)}>
-                  Delete
+                  <span className="btn-text">Delete</span>
+                  <span className="btn-icon" aria-hidden="true">🗑</span>
                 </button>
               </div>
             </div>

@@ -26,8 +26,19 @@ export const api = {
   addUpi: (payload) => request('/upis', { method: 'POST', body: JSON.stringify(payload) }),
   deleteUpi: (id) => request(`/upis/${id}`, { method: 'DELETE' }),
 
+  listPans: () => request('/pans'),
+  addPan: (payload) => request('/pans', { method: 'POST', body: JSON.stringify(payload) }),
+  updatePan: (id, payload) => request(`/pans/${id}`, { method: 'PUT', body: JSON.stringify(payload) }),
+  deletePan: (id) => request(`/pans/${id}`, { method: 'DELETE' }),
+
   getInstruments: () => request('/ipo/instruments'),
   getApplications: () => request('/ipo/applications'),
   apply: (payload) => request('/ipo/apply', { method: 'POST', body: JSON.stringify(payload) }),
   cancel: (accountId, appId) => request(`/accounts/${accountId}/ipo/applications/${appId}`, { method: 'DELETE' }),
+  checkIpoStatus: ({ name, pan }) =>
+    request(`/ipo/status?name=${encodeURIComponent(name)}&pan=${encodeURIComponent(pan)}`),
+  listKfintechIpos: () => request('/ipo/kfintech-list'),
+  listRegistryIpos: () => request('/ipo/registry'),
+  checkAllotment: (clientId, registrar) =>
+    request(`/ipo/allotment?client_id=${encodeURIComponent(clientId)}&registrar=${encodeURIComponent(registrar)}`),
 };
