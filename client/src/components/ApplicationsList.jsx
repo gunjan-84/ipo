@@ -23,6 +23,7 @@ function formatDateTime(d) {
 // misspelled "Not Alloted"). Map known variants to one canonical spelling.
 const STATUS_ALIASES = {
   'not alloted': 'not allotted',
+  'payment pending': 'submitted',
 };
 
 function normalizeStatus(raw) {
@@ -48,7 +49,7 @@ function normalizeGrowwOrder(o) {
     status,
     bids: null,
     amount_blocked: null,
-    payment_status: o.overallSubscription ? `${o.overallSubscription}x sub` : null,
+    payment_status: o.remark || null,
     created_at: o.orderTimeStamp,
     cancellable: !['cancelled', 'rejected', 'allotted', 'not allotted'].includes(status),
   };
