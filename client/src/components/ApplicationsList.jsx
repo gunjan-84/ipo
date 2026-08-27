@@ -14,11 +14,33 @@ function formatDateTime(d) {
   }
 }
 
+// Brokers spell the same status differently (camelCase, SCREAMING_SNAKE, extra
+// whitespace, ...). Canonicalize to "lowercase words separated by single spaces"
+// so e.g. Kite's raw status and Groww's orderStatus land on the same string
+// ("not allotted") and get grouped into the same section/tab/stat-tile instead
+// of splitting into broker-specific duplicates.
+// Some brokers also just spell a status differently outright (Groww sends the
+// misspelled "Not Alloted"). Map known variants to one canonical spelling.
+const STATUS_ALIASES = {
+  'not alloted': 'not allotted',
+};
+
+function normalizeStatus(raw) {
+  if (!raw) return '';
+  const cleaned = String(raw)
+    .replace(/([a-z])([A-Z])/g, '$1 $2')
+    .toLowerCase()
+    .replace(/[_-]+/g, ' ')
+    .replace(/\s+/g, ' ')
+    .trim();
+  return STATUS_ALIASES[cleaned] || cleaned;
+}
+
 // Groww's order-list endpoint doesn't return bid qty/price/amount the way Kite's
 // applications do — normalize what's available into the same shape so both brokers
 // render through one table/filter/sort pipeline.
 function normalizeGrowwOrder(o) {
-  const status = (o.orderStatus || '').toLowerCase().replace(/_/g, ' ');
+  const status = normalizeStatus(o.orderStatus);
   return {
     id: o.growwOrderId,
     symbol: o.symbol,
@@ -28,7 +50,7 @@ function normalizeGrowwOrder(o) {
     amount_blocked: null,
     payment_status: o.overallSubscription ? `${o.overallSubscription}x sub` : null,
     created_at: o.orderTimeStamp,
-    cancellable: !['cancelled', 'rejected'].includes(status),
+    cancellable: !['cancelled', 'rejected', 'allotted', 'not allotted'].includes(status),
   };
 }
 
@@ -141,7 +163,7 @@ export default function ApplicationsList({ onGoToAccounts }) {
 
       const kiteGroups = (kiteRes.data || []).map((g) => ({
         account: { ...g.account, broker: 'zerodha' },
-        applications: g.applications,
+        applications: g.applications.map((a) => ({ ...a, status: normalizeStatus(a.status) })),
         error: g.error,
       }));
 
