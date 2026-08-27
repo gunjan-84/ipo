@@ -11,30 +11,28 @@ from checksum import generate_groww_checksum
 # Force stdout encoding for compatibility
 sys.stdout.reconfigure(encoding='utf-8')
 
-def unlock_pin_natively():
+def unlock_pin_natively(pin=None, bearer_token=None, device_id=None, user_nkey=None):
     """
     100% Native Python PIN Unlocker.
-    Requires a valid GROWW_BEARER_TOKEN and GROWW_NKEY stored in .env (via create_session.py).
-    Sends the mathematical handshake and saves the PIN Token back to .env.
+    Can be called directly with arguments by a backend server, or run standalone via CLI.
+    Returns a dictionary with the PIN token on success.
     """
-    env_path = os.path.join(os.path.dirname(__file__), '.env')
-    load_dotenv(env_path, override=True)
+    env_path = os.path.join(os.path.dirname(os.path.abspath(__file__)), '.env')
     
-    PIN = os.getenv("PIN")
-    bearer_token = os.getenv("GROWW_BEARER_TOKEN")
-    device_id = os.getenv("GROWW_DEVICE_ID")
-    user_nkey = os.getenv("GROWW_NKEY")
+    # If any arguments are missing, fallback to .env for CLI execution
+    if not all([pin, bearer_token, device_id, user_nkey]):
+        load_dotenv(env_path, override=True)
+        pin = pin or os.getenv("PIN")
+        bearer_token = bearer_token or os.getenv("GROWW_BEARER_TOKEN")
+        device_id = device_id or os.getenv("GROWW_DEVICE_ID")
+        user_nkey = user_nkey or os.getenv("GROWW_NKEY")
 
-    if not PIN:
-        print("[-] Error: PIN not found in .env!")
-        return False
-        
-    if not bearer_token or not device_id or not user_nkey:
-        print("[-] Error: Missing Bearer Token, Device ID, or NKey! Please run create_session.py first.")
-        return False
+    if not pin or not bearer_token or not device_id or not user_nkey:
+        print("[-] Error: Missing PIN, Bearer Token, Device ID, or NKey!")
+        return {"success": False, "error": "Missing required credentials"}
 
     url = "/v1/api/user/v2/auth/pin/validate"
-    payload = {"passCode": PIN}
+    payload = {"passCode": pin}
     
     # Generate one-time request parameters
     req_id = str(uuid.uuid4())
@@ -86,16 +84,18 @@ def unlock_pin_natively():
         user_campaign = data.get("data", {}).get("userCampaignHeader")
         print(f"[+] Unlocked PIN Token: {user_campaign[:50]}...")
         
-        set_key(env_path, "GROWW_PIN_TOKEN", user_campaign)
-        
-        print("\n[+] PIN Token saved to .env as GROWW_PIN_TOKEN!")
-        print("[+] Your Python bots can now trade purely natively without Playwright!")
-        return True
+        # Only write to .env if executed directly via CLI
+        if __name__ == "__main__":
+            set_key(env_path, "GROWW_PIN_TOKEN", user_campaign)
+            print("\n[+] PIN Token saved to .env as GROWW_PIN_TOKEN!")
+            print("[+] Your Python bots can now trade purely natively without Playwright!")
+            
+        return {"success": True, "pin_token": user_campaign, "data": data}
         
     else:
         print(f"\n[-] FAILED. Status: {response.status_code}")
         print(response.text)
-        return False
+        return {"success": False, "error": response.text, "status_code": response.status_code}
 
 if __name__ == "__main__":
     unlock_pin_natively()

@@ -6,6 +6,7 @@ import uuid
 
 import requests
 
+import groww_login
 from groww_checksum import generate_checksum
 
 BASE = "https://groww.in"
@@ -101,3 +102,113 @@ async def fetch_orders_with_auto_unlock(account: dict):
         raise RuntimeError(f"Fetching Groww orders failed ({res.status_code}): {res.text[:200]}")
 
     return res.json().get("orders", []), refreshed_pin_token
+
+
+def _apply_for_ipo_sync(bearer_token, device_id, nkey, pin_token, symbol, isin, quantity, price, upi_id, cutoff):
+    url_path = "/v1/api/stocks_ipo/v1/order"
+    payload = {
+        "bidRequests": [
+            {
+                "amount": int(quantity * price),
+                "bidReferenceNumber": "",
+                "isAtCutoffPrice": cutoff,
+                "price": price,
+                "quantity": quantity,
+            }
+        ],
+        "isin": isin,
+        "symbol": symbol,
+        "upi": upi_id,
+        "category": "IND",
+    }
+    req_id, salt = _req_id_and_salt()
+    checksum = generate_checksum(url_path, payload, req_id, salt)
+    headers = _common_headers(bearer_token, device_id, nkey, req_id, checksum)
+    headers["x-user-campaign"] = f"Bearer {pin_token}"
+    payload_str = json.dumps(payload, separators=(",", ":"))
+
+    return requests.post(f"{BASE}{url_path}", headers=headers, data=payload_str, timeout=15)
+
+
+def _cancel_order_sync(bearer_token, device_id, nkey, pin_token, order_id, search_id=None, cf_cookies=None):
+    url_path = f"/v1/api/stocks_ipo/v1/order/{order_id}/cancel"
+    req_id, salt = _req_id_and_salt()
+    checksum = generate_checksum(url_path, None, req_id, salt)
+    headers = _common_headers(bearer_token, device_id, nkey, req_id, checksum)
+    # Captured from a real cancel: unlike every other endpoint, this one's headers omit
+    # x-user-nkey entirely, and the Referer must be the actual order-status page (not just
+    # the site origin) — Groww's backend apparently checks it for this specific endpoint.
+    del headers["x-user-nkey"]
+    headers["content-type"] = "application/x-www-form-urlencoded"
+    headers["x-user-campaign"] = f"Bearer {pin_token}"
+    if search_id:
+        headers["referer"] = f"{BASE}/ipo/{search_id}/status/{order_id}"
+
+    return requests.put(
+        f"{BASE}{url_path}", headers=headers, data="", cookies=cf_cookies or {}, timeout=15
+    )
+
+
+async def _with_pin_retry(account: dict, call_once):
+    """Runs `call_once(pin_token)`; if it comes back 403 (pin token expired/missing),
+    unlocks a fresh one from the stored PIN and retries exactly once. Returns
+    (response, refreshed_pin_token_or_None)."""
+    pin_token = account.get("pin_token")
+    refreshed_pin_token = None
+
+    if pin_token:
+        res = await asyncio.to_thread(call_once, pin_token)
+        if res.status_code != 403:
+            return res, None
+
+    pin_token = await unlock_pin(account["bearer_token"], account["device_id"], account["nkey"], account["pin"])
+    refreshed_pin_token = pin_token
+    res = await asyncio.to_thread(call_once, pin_token)
+    return res, refreshed_pin_token
+
+
+# Applies for an IPO on a Groww account — a real, fund-blocking financial transaction,
+# only ever triggered by an explicit user action in the UI (never run autonomously).
+async def apply_for_ipo(account: dict, symbol: str, isin: str, quantity: int, price: float, upi_id: str, cutoff: bool = True):
+    def call_once(pin_token):
+        return _apply_for_ipo_sync(
+            account["bearer_token"], account["device_id"], account["nkey"], pin_token,
+            symbol, isin, quantity, price, upi_id, cutoff,
+        )
+
+    res, refreshed_pin_token = await _with_pin_retry(account, call_once)
+    if res.status_code not in (200, 201):
+        raise RuntimeError(f"IPO application failed ({res.status_code}): {res.text[:300]}")
+    return res.json(), refreshed_pin_token
+
+
+# Cancels a previously submitted IPO application — same "explicit user action only" rule as apply.
+# Groww's cancel endpoint sits behind Cloudflare bot management, which requires __cf_bm/_cfuvid
+# cookies that only a real browser (passing Cloudflare's JS challenge) can obtain — so before
+# cancelling we do a lightweight, non-interactive page load with the account's saved session to
+# pick up fresh cookies, then hand them to the actual cancel request.
+async def cancel_order(account: dict, order_id: str, search_id: str = None):
+    cf_cookies = None
+    if account.get("state_data"):
+        try:
+            status_path = f"/ipo/{search_id}/status/{order_id}" if search_id else "/"
+            cf_cookies = await groww_login.fetch_cf_cookies(account["state_data"], status_path)
+        except Exception:
+            cf_cookies = None
+
+    def call_once(pin_token):
+        return _cancel_order_sync(
+            account["bearer_token"], account["device_id"], account["nkey"], pin_token, order_id,
+            search_id, cf_cookies,
+        )
+
+    res, refreshed_pin_token = await _with_pin_retry(account, call_once)
+    if res.status_code not in (200, 201, 204):
+        raise RuntimeError(f"Cancelling order failed ({res.status_code}): {res.text[:300]}")
+    data = {}
+    if res.text:
+        try:
+            data = res.json()
+        except ValueError:
+            pass
+    return data, refreshed_pin_token

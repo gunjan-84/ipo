@@ -11,6 +11,7 @@ from fastapi.responses import JSONResponse
 import accounts_store
 import connections_store
 import groww_client
+import groww_login
 import groww_store
 import kfintech_store
 import mufg_store
@@ -602,16 +603,109 @@ async def check_allotment(client_id: str, registrar: str = REGISTRAR_KFINTECH):
     return {"status": "success", "data": results}
 
 
-# --- Groww: bearer_token/device_id/nkey are captured once via a manual browser login
-# (done outside this app — see create_session.py) and pasted in here; from then on the
-# PIN alone lets us silently refresh access (see groww_client.unlock_pin), so the user
-# never has to repeat that browser login just to keep pulling their IPO orders. ---
+# --- Groww: bearer_token/device_id/nkey are captured once by driving Groww's real login
+# page (see groww_login.py) — the user's own email/password, and any OTP Groww sends them,
+# same as logging in through a browser. From then on the PIN alone lets us silently
+# refresh access (see groww_client.unlock_pin), and the saved browser session (state_data)
+# lets us silently refresh the bearer token itself if it expires — so the user never has
+# to repeat that login just to keep pulling orders or applying to IPOs. ---
+# Label + PIN chosen at /api/groww/login/start time, held here only until /otp completes
+# the login and the account can actually be created (in-memory only — never touches disk).
+_pending_logins: dict[str, dict] = {}
+
+
 def find_groww_account(account_id: str):
     return next((a for a in groww_accounts if a["id"] == account_id), None)
 
 
 def public_groww_account(a: dict) -> dict:
     return {"id": a["id"], "label": a["label"], "connected": bool(a.get("pin_token"))}
+
+
+def _save_groww_login_result(label: str, login_result: dict) -> dict:
+    account = {
+        "id": str(uuid.uuid4()),
+        "label": label or "Groww",
+        "bearer_token": login_result["bearer_token"],
+        "device_id": login_result["device_id"],
+        "nkey": login_result["user_nkey"],
+        "pin": login_result["pin"],
+        "pin_token": None,
+        "state_data": login_result.get("state_data"),
+    }
+    groww_accounts.append(account)
+    groww_store.save(groww_accounts)
+    log.info(f"groww account added via login: {account['label']}")
+    return account
+
+
+# Step 1 of adding a Groww account: drive the real login form with email/password. Groww
+# either lets us straight through to the PIN screen, or challenges with an OTP first — in
+# which case we pause and ask the frontend to collect it from the user right now.
+@app.post("/api/groww/login/start")
+async def groww_login_start(payload: dict):
+    label = (payload.get("label") or "").strip()
+    email = (payload.get("email") or "").strip()
+    password = payload.get("password") or ""
+    pin = (payload.get("pin") or "").strip()
+    if not email or not password or not pin:
+        return JSONResponse(
+            status_code=400, content={"status": "error", "message": "email, password and pin are required"}
+        )
+
+    result = await groww_login.start_login(email, password, pin)
+    if result["status"] == "error":
+        return JSONResponse(status_code=502, content={"status": "error", "message": result["message"]})
+
+    if result["status"] == "otp_required":
+        _pending_logins[result["session_id"]] = {"label": label, "pin": pin}
+        return {"status": "success", "data": {"otp_required": True, "session_id": result["session_id"]}}
+
+    account = _save_groww_login_result(label, {**result, "pin": pin})
+    return {"status": "success", "data": {"otp_required": False, "account": public_groww_account(account)}}
+
+
+# Step 2 (only when start_login paused for one): the OTP Groww just sent the user.
+@app.post("/api/groww/login/otp")
+async def groww_login_otp(payload: dict):
+    session_id = payload.get("session_id")
+    otp = (payload.get("otp") or "").strip()
+    if not session_id or not otp:
+        return JSONResponse(status_code=400, content={"status": "error", "message": "session_id and otp are required"})
+
+    result = await groww_login.submit_otp(session_id, otp)
+    if result["status"] == "error":
+        return JSONResponse(status_code=502, content={"status": "error", "message": result["message"]})
+
+    pending = _pending_logins.pop(session_id, {"label": "", "pin": None})
+    if not pending["pin"]:
+        return JSONResponse(
+            status_code=400, content={"status": "error", "message": "This login attempt has expired — please start again"}
+        )
+    account = _save_groww_login_result(pending["label"], {**result, "pin": pending["pin"]})
+    return {"status": "success", "data": public_groww_account(account)}
+
+
+# Shared recovery path for order/apply/cancel calls: if the action fails and we have a
+# saved browser session, silently refresh the bearer token (no OTP) and retry once.
+async def _groww_with_recovery(account: dict, action):
+    try:
+        return await action(account)
+    except Exception:
+        if not account.get("state_data"):
+            raise
+        refresh = await groww_login.silent_refresh(account["state_data"])
+        if refresh["status"] != "success":
+            raise
+        account["bearer_token"] = refresh["bearer_token"]
+        account["device_id"] = refresh["device_id"]
+        if refresh.get("user_nkey"):
+            account["nkey"] = refresh["user_nkey"]
+        account["state_data"] = refresh["state_data"]
+        account["pin_token"] = None
+        groww_store.save(groww_accounts)
+        log.info(f"groww bearer token silently refreshed for {account['label']}")
+        return await action(account)
 
 
 @app.get("/api/groww/accounts")
@@ -688,8 +782,46 @@ async def delete_groww_account(account_id: str):
     return {"status": "success"}
 
 
-# Orchestrates the full sequence: fetch with the stored pin_token, transparently
-# unlocking a fresh one from the stored PIN if it's expired, then retrying once.
+# Mirrors Kite's "Connect": confirms access works right now by unlocking a fresh PIN
+# token (falling back to a silent bearer-token refresh first, if needed), rather than
+# waiting for the next orders/apply/cancel call to discover it's stale.
+@app.post("/api/groww/accounts/{account_id}/connect")
+async def connect_groww_account(account_id: str):
+    account = find_groww_account(account_id)
+    if not account:
+        return JSONResponse(status_code=404, content={"status": "error", "message": "Account not found"})
+
+    async def do_unlock(acc):
+        return await groww_client.unlock_pin(acc["bearer_token"], acc["device_id"], acc["nkey"], acc["pin"])
+
+    try:
+        pin_token = await _groww_with_recovery(account, do_unlock)
+    except Exception as err:
+        log.warning(f"groww connect failed for {account['label']}: {err}")
+        return JSONResponse(status_code=502, content={"status": "error", "message": str(err)})
+
+    account["pin_token"] = pin_token
+    groww_store.save(groww_accounts)
+    log.info(f"groww account connected: {account['label']}")
+    return {"status": "success", "data": public_groww_account(account)}
+
+
+# Mirrors Kite's "Disconnect": drops the current PIN unlock (the saved login session and
+# PIN are kept, so reconnecting doesn't need a fresh browser login or OTP).
+@app.post("/api/groww/accounts/{account_id}/disconnect")
+async def disconnect_groww_account(account_id: str):
+    account = find_groww_account(account_id)
+    if not account:
+        return JSONResponse(status_code=404, content={"status": "error", "message": "Account not found"})
+    account["pin_token"] = None
+    groww_store.save(groww_accounts)
+    log.info(f"groww account disconnected: {account['label']}")
+    return {"status": "success", "data": public_groww_account(account)}
+
+
+# Orchestrates the full sequence: fetch with the stored pin_token, transparently unlocking
+# a fresh one from the stored PIN if it's expired (and, if even that fails, silently
+# refreshing the bearer token from the saved browser session), then retrying.
 @app.get("/api/groww/accounts/{account_id}/orders")
 async def get_groww_orders(account_id: str):
     account = find_groww_account(account_id)
@@ -697,7 +829,7 @@ async def get_groww_orders(account_id: str):
         return JSONResponse(status_code=404, content={"status": "error", "message": "Account not found"})
 
     try:
-        orders, refreshed_pin_token = await groww_client.fetch_orders_with_auto_unlock(account)
+        orders, refreshed_pin_token = await _groww_with_recovery(account, groww_client.fetch_orders_with_auto_unlock)
     except Exception as err:
         log.exception(f"groww fetch failed for {account['label']}")
         return JSONResponse(status_code=502, content={"status": "error", "message": str(err)})
@@ -708,3 +840,59 @@ async def get_groww_orders(account_id: str):
         log.info(f"groww PIN token refreshed for {account['label']}")
 
     return {"status": "success", "data": orders}
+
+
+# Applies for an IPO on a Groww account — only ever called by an explicit "Apply" click.
+@app.post("/api/groww/accounts/{account_id}/apply")
+async def apply_groww_ipo(account_id: str, payload: dict):
+    account = find_groww_account(account_id)
+    if not account:
+        return JSONResponse(status_code=404, content={"status": "error", "message": "Account not found"})
+
+    symbol = payload.get("symbol")
+    isin = payload.get("isin")
+    quantity = payload.get("quantity")
+    price = payload.get("price")
+    upi_id = payload.get("upi_id")
+    cutoff = payload.get("cutoff", True)
+    if not symbol or not isin or not quantity or not price or not upi_id:
+        return JSONResponse(
+            status_code=400,
+            content={"status": "error", "message": "symbol, isin, quantity, price and upi_id are required"},
+        )
+
+    try:
+        data, refreshed_pin_token = await _groww_with_recovery(
+            account, lambda acc: groww_client.apply_for_ipo(acc, symbol, isin, quantity, price, upi_id, cutoff)
+        )
+    except Exception as err:
+        log.exception(f"groww apply failed for {account['label']}")
+        return JSONResponse(status_code=502, content={"status": "error", "message": str(err)})
+
+    if refreshed_pin_token:
+        account["pin_token"] = refreshed_pin_token
+    groww_store.save(groww_accounts)
+    log.info(f"groww apply result for {account['label']} ({symbol}): success")
+    return {"status": "success", "data": data}
+
+
+# Cancels a previously submitted IPO application — only ever called by an explicit "Cancel" click.
+@app.delete("/api/groww/accounts/{account_id}/orders/{order_id}")
+async def cancel_groww_order(account_id: str, order_id: str, search_id: str = None):
+    account = find_groww_account(account_id)
+    if not account:
+        return JSONResponse(status_code=404, content={"status": "error", "message": "Account not found"})
+
+    try:
+        data, refreshed_pin_token = await _groww_with_recovery(
+            account, lambda acc: groww_client.cancel_order(acc, order_id, search_id)
+        )
+    except Exception as err:
+        log.exception(f"groww cancel failed for {account['label']}")
+        return JSONResponse(status_code=502, content={"status": "error", "message": str(err)})
+
+    if refreshed_pin_token:
+        account["pin_token"] = refreshed_pin_token
+    groww_store.save(groww_accounts)
+    log.info(f"groww cancel result for {account['label']} (order {order_id}): success")
+    return {"status": "success", "data": data}

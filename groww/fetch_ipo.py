@@ -11,20 +11,23 @@ from checksum import generate_groww_checksum
 # Force stdout encoding for compatibility
 sys.stdout.reconfigure(encoding='utf-8')
 
-def fetch_active_ipos():
+def fetch_active_ipos(bearer_token=None, device_id=None, user_nkey=None, pin_token=None):
     """
     Fetches the list of active IPOs purely natively using the reverse-engineered checksum.
+    Can be called directly with arguments by a backend server, or run standalone via CLI.
+    Returns a dictionary with the response data.
     """
-    env_path = os.path.join(os.path.dirname(__file__), '.env')
-    load_dotenv(env_path, override=True)
-    bearer_token = os.getenv("GROWW_BEARER_TOKEN")
-    device_id = os.getenv("GROWW_DEVICE_ID")
-    user_nkey = os.getenv("GROWW_NKEY")
-    pin_token = os.getenv("GROWW_PIN_TOKEN")
+    if not all([bearer_token, device_id, user_nkey, pin_token]):
+        env_path = os.path.join(os.path.dirname(os.path.abspath(__file__)), '.env')
+        load_dotenv(env_path, override=True)
+        bearer_token = bearer_token or os.getenv("GROWW_BEARER_TOKEN")
+        device_id = device_id or os.getenv("GROWW_DEVICE_ID")
+        user_nkey = user_nkey or os.getenv("GROWW_NKEY")
+        pin_token = pin_token or os.getenv("GROWW_PIN_TOKEN")
 
     if not bearer_token or not device_id or not user_nkey or not pin_token:
         print("[-] Error: Missing tokens in .env. Run create_session.py and unlock_pin.py first.")
-        return
+        return {"success": False, "error": "Missing required credentials"}
 
     # GET requests have no payload, which translates to 'undefined' in JavaScript
     url_path = "/v1/api/primaries/v1/ipo/order/active"
@@ -66,12 +69,15 @@ def fetch_active_ipos():
         print("\n[+] SUCCESS! Status: 200 OK")
         print("\nActive IPO Data:")
         print(json.dumps(data, indent=2))
+        return {"success": True, "data": data}
     elif response.status_code == 403:
         print("\n[-] FAILED. Status: 403 PIN Locked")
         print("Your PIN token has expired or is invalid. Run unlock_pin.py to renew it.")
+        return {"success": False, "error": "403 PIN Locked", "status_code": 403}
     else:
         print(f"\n[-] FAILED. Status: {response.status_code}")
         print(response.text)
+        return {"success": False, "error": response.text, "status_code": response.status_code}
 
 if __name__ == "__main__":
     fetch_active_ipos()

@@ -46,5 +46,13 @@ export const api = {
   addGrowwAccount: (payload) => request('/groww/accounts', { method: 'POST', body: JSON.stringify(payload) }),
   updateGrowwAccount: (id, payload) => request(`/groww/accounts/${id}`, { method: 'PUT', body: JSON.stringify(payload) }),
   deleteGrowwAccount: (id) => request(`/groww/accounts/${id}`, { method: 'DELETE' }),
+  connectGrowwAccount: (id) => request(`/groww/accounts/${id}/connect`, { method: 'POST' }),
+  disconnectGrowwAccount: (id) => request(`/groww/accounts/${id}/disconnect`, { method: 'POST' }),
   getGrowwOrders: (id) => request(`/groww/accounts/${id}/orders`),
+  growwLoginStart: (payload) => request('/groww/login/start', { method: 'POST', body: JSON.stringify(payload) }),
+  growwLoginOtp: (payload) => request('/groww/login/otp', { method: 'POST', body: JSON.stringify(payload) }),
+  applyGrowwIpo: (accountId, payload) =>
+    request(`/groww/accounts/${accountId}/apply`, { method: 'POST', body: JSON.stringify(payload) }),
+  cancelGrowwOrder: (accountId, orderId) =>
+    request(`/groww/accounts/${accountId}/orders/${orderId}`, { method: 'DELETE' }),
 };

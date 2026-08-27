@@ -14,16 +14,39 @@ function formatDateTime(d) {
   }
 }
 
+// Groww's order-list endpoint doesn't return bid qty/price/amount the way Kite's
+// applications do — normalize what's available into the same shape so both brokers
+// render through one table/filter/sort pipeline.
+function normalizeGrowwOrder(o) {
+  const status = (o.orderStatus || '').toLowerCase().replace(/_/g, ' ');
+  return {
+    id: o.growwOrderId,
+    symbol: o.symbol,
+    exchange: o.companyName,
+    status,
+    bids: null,
+    amount_blocked: null,
+    payment_status: o.overallSubscription ? `${o.overallSubscription}x sub` : null,
+    created_at: o.orderTimeStamp,
+    cancellable: !['cancelled', 'rejected'].includes(status),
+  };
+}
+
 function AccountApplications({ group, filtered, hasActiveFilter, onCancelled }) {
   const [cancellingId, setCancellingId] = useState(null);
   const [error, setError] = useState('');
+  const isGroww = group.account.broker === 'groww';
 
   async function handleCancel(app) {
     if (!confirm(`Cancel ${group.account.label}'s application for ${app.symbol}?`)) return;
     setCancellingId(app.id);
     setError('');
     try {
-      await api.cancel(group.account.id, app.id);
+      if (isGroww) {
+        await api.cancelGrowwOrder(group.account.id, app.id);
+      } else {
+        await api.cancel(group.account.id, app.id);
+      }
       onCancelled();
     } catch (err) {
       setError(err.message);
@@ -35,7 +58,7 @@ function AccountApplications({ group, filtered, hasActiveFilter, onCancelled }) 
   return (
     <div className="account-group">
       <h3 className="account-group-title">
-        {group.account.label} <span className="cell-sub">({group.account.user_id})</span>
+        {group.account.label} <span className="cell-sub">({isGroww ? 'Groww' : group.account.user_id})</span>
       </h3>
 
       {group.error && <div className="error">{group.error}</div>}
@@ -62,6 +85,9 @@ function AccountApplications({ group, filtered, hasActiveFilter, onCancelled }) 
             <tbody>
               {filtered.map((app) => {
                 const bid = app.bids?.[0];
+                const cancellable = app.bids
+                  ? !['cancelled', 'allotted', 'not allotted'].includes(app.status)
+                  : app.cancellable;
                 return (
                   <tr key={app.id}>
                     <td>
@@ -69,7 +95,7 @@ function AccountApplications({ group, filtered, hasActiveFilter, onCancelled }) 
                       <div className="cell-sub">{app.exchange}</div>
                     </td>
                     <td>
-                      <span className={`status-badge status-app-${app.status.replace(' ', '-')}`}>
+                      <span className={`status-badge status-app-${app.status.replace(/ /g, '-')}`}>
                         {app.status}
                       </span>
                     </td>
@@ -78,7 +104,7 @@ function AccountApplications({ group, filtered, hasActiveFilter, onCancelled }) 
                     <td className="cell-sub">{app.payment_status || '—'}</td>
                     <td className="cell-sub">{formatDateTime(app.created_at)}</td>
                     <td>
-                      {!['cancelled', 'allotted', 'not allotted'].includes(app.status) && (
+                      {cancellable && (
                         <button
                           className="danger-btn"
                           disabled={cancellingId === app.id}
@@ -111,8 +137,31 @@ export default function ApplicationsList({ onGoToAccounts }) {
     setLoading(true);
     setError('');
     try {
-      const res = await api.getApplications();
-      setGroups(res.data || []);
+      const [kiteRes, growwAccRes] = await Promise.all([api.getApplications(), api.listGrowwAccounts()]);
+
+      const kiteGroups = (kiteRes.data || []).map((g) => ({
+        account: { ...g.account, broker: 'zerodha' },
+        applications: g.applications,
+        error: g.error,
+      }));
+
+      const growwAccounts = growwAccRes.data || [];
+      const growwGroups = await Promise.all(
+        growwAccounts.map(async (acc) => {
+          try {
+            const res = await api.getGrowwOrders(acc.id);
+            return {
+              account: { ...acc, broker: 'groww' },
+              applications: (res.data || []).map(normalizeGrowwOrder),
+              error: null,
+            };
+          } catch (err) {
+            return { account: { ...acc, broker: 'groww' }, applications: [], error: err.message };
+          }
+        })
+      );
+
+      setGroups([...kiteGroups, ...growwGroups]);
     } catch (err) {
       setError(err.message);
     } finally {
