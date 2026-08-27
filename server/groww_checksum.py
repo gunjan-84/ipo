@@ -7,10 +7,21 @@ from Crypto.Cipher import AES
 _SECRET_K = "adepto007$22"
 
 
-def generate_checksum(url_path: str, payload_dict: dict | None, req_id: str, salt: str) -> str:
+def generate_checksum(url_path: str, payload_dict, req_id: str, salt: str) -> str:
     """Reverse-engineered Groww web-app request checksum: AES-CBC (no padding) over an
-    80-byte block built from the request-id hash and a hash of the URL+payload."""
-    payload_str = "undefined" if payload_dict is None else json.dumps(payload_dict, separators=(",", ":"))
+    80-byte block built from the request-id hash and a hash of the URL+payload.
+
+    payload_dict is None for GET/unauthenticated-body calls (hashed as the literal string
+    "undefined", matching Groww's JS `JSON.stringify(undefined)`); it's "" specifically for
+    PUT calls with a truly empty body like cancel, where Groww hashes the empty string
+    instead — passing None there produces "undefined" and gets rejected with a 500.
+    """
+    if payload_dict is None:
+        payload_str = "undefined"
+    elif payload_dict == "":
+        payload_str = ""
+    else:
+        payload_str = json.dumps(payload_dict, separators=(",", ":"))
 
     l_hash = hashlib.sha256((url_path + payload_str).encode("utf-8")).hexdigest()
 

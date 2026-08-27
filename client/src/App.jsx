@@ -7,6 +7,7 @@ import IpoList from './components/IpoList';
 import ApplicationsList from './components/ApplicationsList';
 import AllotmentCheck from './components/AllotmentCheck';
 import ThemeToggle from './components/ThemeToggle';
+import LoginPage from './components/LoginPage';
 import './App.css';
 
 const TABS = [
@@ -20,13 +21,38 @@ const TABS = [
 
 export default function App() {
   const [tab, setTab] = useState('ipos');
+  const [auth, setAuth] = useState(null); // null while loading, else {configured, authenticated, username}
 
   useEffect(() => {
+    api
+      .authStatus()
+      .then((res) => setAuth(res.data))
+      .catch(() => setAuth({ configured: true, authenticated: false, username: null }));
+  }, []);
+
+  useEffect(() => {
+    if (!auth?.authenticated) return;
     // Triggers the server's per-account token validation so any account whose
     // enctoken has expired is dropped back to "not connected" immediately,
     // rather than waiting for the user to open a page that hits Kite.
     api.getApplications().catch(() => {});
-  }, []);
+  }, [auth?.authenticated]);
+
+  async function handleLogout() {
+    await api.authLogout().catch(() => {});
+    setAuth((a) => ({ ...a, authenticated: false, username: null }));
+  }
+
+  if (auth === null) return <div className="panel-loading">Loading…</div>;
+
+  if (!auth.authenticated) {
+    return (
+      <LoginPage
+        configured={auth.configured}
+        onLoggedIn={(username) => setAuth({ configured: true, authenticated: true, username })}
+      />
+    );
+  }
 
   return (
     <div className="page">
@@ -47,6 +73,9 @@ export default function App() {
         </nav>
         <div className="header-right">
           <ThemeToggle />
+          <button className="secondary-btn" onClick={handleLogout}>
+            Log out
+          </button>
         </div>
       </header>
 

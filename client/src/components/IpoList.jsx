@@ -1,8 +1,44 @@
-import { useEffect, useState } from 'react';
+import { useEffect, useMemo, useState } from 'react';
 import { api } from '../api';
 import ApplyModal from './ApplyModal';
+import SubscriptionModal from './SubscriptionModal';
 
 const DAY_MS = 86400000;
+const PREMIUM_NOISE_WORDS = new Set(['LIMITED', 'LTD', 'IPO', 'SME', 'INDIA']);
+
+function normalizeIpoName(name) {
+  return (name || '')
+    .toUpperCase()
+    .replace(/\([^)]*\)/g, ' ')
+    .replace(/[^A-Z0-9 ]/g, ' ')
+    .split(/\s+/)
+    .filter((t) => t && !PREMIUM_NOISE_WORDS.has(t))
+    .join(' ');
+}
+
+// ipoji's card names don't always match our instrument names exactly (e.g. dropped
+// suffixes), so match on normalized token overlap rather than requiring equality.
+function findPremiumMatch(instrument, premiums) {
+  const target = normalizeIpoName(instrument.name || instrument.symbol);
+  if (!target) return null;
+  const targetTokens = new Set(target.split(' '));
+
+  let best = null;
+  let bestScore = 0;
+  for (const p of premiums) {
+    const candidate = normalizeIpoName(p.name);
+    if (!candidate) continue;
+    if (candidate === target) return p;
+    const candidateTokens = candidate.split(' ');
+    const overlap = candidateTokens.filter((t) => targetTokens.has(t)).length;
+    const score = overlap / Math.max(targetTokens.size, candidateTokens.length);
+    if (score > bestScore) {
+      bestScore = score;
+      best = p;
+    }
+  }
+  return bestScore >= 0.6 ? best : null;
+}
 
 function fmtDayMonth(dateStr) {
   if (!dateStr) return '—';
@@ -17,6 +53,13 @@ function ipojiLink(instrument) {
     .replace(/[^a-z0-9]+/g, '-')
     .replace(/^-+|-+$/g, '');
   return `https://www.ipoji.com/ipo/${slug}-ipo`;
+}
+
+function listingChangeLabel(premium) {
+  const match = premium.listing_note?.match(/(\d+(\.\d+)?%)/);
+  const pct = match ? match[1] : '';
+  const word = premium.listing_direction === 'down' ? 'Discount' : 'Premium';
+  return pct ? `${word} ${pct}` : word;
 }
 
 function daysLeftInfo(endAt, today) {
@@ -79,7 +122,20 @@ function IpoTimeline({ instrument, today }) {
   );
 }
 
-function IpoRow({ instrument: ins, closed, today, onApply }) {
+function IpoListHeader() {
+  return (
+    <div className="ipo-row ipo-row-header">
+      <div className="ipo-row-col ipo-row-instrument">Instrument</div>
+      <div className="ipo-row-col ipo-row-date">Closing</div>
+      <div className="ipo-row-col ipo-row-price">Price</div>
+      <div className="ipo-row-col ipo-row-gmp">GMP/Listing Price</div>
+      <div className="ipo-row-col ipo-row-amount">Min. Amount</div>
+      <div className="ipo-row-col ipo-row-action" />
+    </div>
+  );
+}
+
+function IpoRow({ instrument: ins, closed, today, onApply, onShowSubscription, premium }) {
   const [expanded, setExpanded] = useState(false);
   const days = closed ? null : daysLeftInfo(ins.end_at, today);
 
@@ -109,6 +165,29 @@ function IpoRow({ instrument: ins, closed, today, onApply }) {
           ₹{ins.min_price} – {ins.max_price}
         </div>
 
+        <div className="ipo-row-col ipo-row-gmp">
+          {closed && premium?.list_price ? (
+            <>
+              <div className={`ipo-row-gmp-value ${premium.listing_direction === 'down' ? 'down' : 'up'}`}>
+                ₹{premium.list_price}
+              </div>
+              <div className="ipo-row-gmp-sub">{listingChangeLabel(premium)}</div>
+            </>
+          ) : premium?.exp_premium ? (
+            <>
+              <div className={`ipo-row-gmp-value ${premium.premium_direction === 'down' ? 'down' : 'up'}`}>
+                {premium.exp_premium}
+              </div>
+              {premium.subscription && <div className="ipo-row-gmp-sub">{premium.subscription} sub</div>}
+            </>
+          ) : (
+            <>
+              <div className="ipo-row-gmp-value muted">—</div>
+              {premium?.subscription && <div className="ipo-row-gmp-sub">{premium.subscription} sub</div>}
+            </>
+          )}
+        </div>
+
         <div className="ipo-row-col ipo-row-amount">
           <div className="ipo-row-amount-value">₹{ins.min_investment_amount?.toLocaleString('en-IN')}</div>
           <div className="ipo-row-amount-qty">{ins.min_qty} qty</div>
@@ -116,12 +195,25 @@ function IpoRow({ instrument: ins, closed, today, onApply }) {
 
         <div className="ipo-row-col ipo-row-action" onClick={(e) => e.stopPropagation()}>
           {closed ? (
-            <span className="closed-note">Listed {fmtDayMonth(ins.listing_date)}</span>
+            <span className="closed-note">
+              {ins.listing_date && new Date(ins.listing_date.split(' ')[0]) > today ? 'Listing on' : 'Listed'}{' '}
+              {fmtDayMonth(ins.listing_date)}
+            </span>
           ) : (
             <>
-              <a href={ipojiLink(ins)} target="_blank" rel="noreferrer" className="ipo-row-details">
-                Details
-              </a>
+              {premium?.slug ? (
+                <button
+                  type="button"
+                  className="ipo-row-details"
+                  onClick={() => onShowSubscription(ins, premium.slug)}
+                >
+                  Details
+                </button>
+              ) : (
+                <a href={ipojiLink(ins)} target="_blank" rel="noreferrer" className="ipo-row-details">
+                  Details
+                </a>
+              )}
               <button disabled={ins.status !== 'ongoing' || !ins.active} onClick={() => onApply(ins)}>
                 Apply
               </button>
@@ -148,11 +240,30 @@ function IpoRow({ instrument: ins, closed, today, onApply }) {
 
 export default function IpoList({ onGoToAccounts }) {
   const [instruments, setInstruments] = useState([]);
+  const [premiums, setPremiums] = useState([]);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState('');
   const [typeFilter, setTypeFilter] = useState('all');
   const [sortOrder, setSortOrder] = useState('closing-soon');
   const [selected, setSelected] = useState(null);
+  const [subscriptionTarget, setSubscriptionTarget] = useState(null);
+
+  useEffect(() => {
+    // Best-effort — GMP/subscription figures are a nice-to-have, not worth failing the page over.
+    api
+      .getIpoPremiums()
+      .then((res) => setPremiums(res.data || []))
+      .catch(() => {});
+  }, []);
+
+  const premiumByInstrumentId = useMemo(() => {
+    const map = {};
+    for (const ins of instruments) {
+      const match = findPremiumMatch(ins, premiums);
+      if (match) map[ins.id] = match;
+    }
+    return map;
+  }, [instruments, premiums]);
 
   async function load() {
     setLoading(true);
@@ -191,12 +302,8 @@ export default function IpoList({ onGoToAccounts }) {
   const open = pool.filter((i) => i.status === 'ongoing').sort(bySort);
   const closed = pool.filter((i) => i.status !== 'ongoing').sort((a, b) => new Date(b.end_at) - new Date(a.end_at));
 
-  const soonest = open.length ? Math.ceil((new Date(open[0].end_at) - today) / DAY_MS) : null;
   const openSummary =
-    open.length === 0
-      ? 'No issues open right now'
-      : `${open.length} ${open.length === 1 ? 'issue' : 'issues'} open` +
-        (soonest === 0 ? ' · one closes today' : soonest === 1 ? ' · one closes tomorrow' : ` · next closes in ${soonest} days`);
+    open.length === 0 ? 'No issues open right now' : `${open.length} ${open.length === 1 ? 'issue' : 'issues'} open`;
 
   return (
     <div>
@@ -240,8 +347,17 @@ export default function IpoList({ onGoToAccounts }) {
           <div className="empty-state">No open issues match this filter.</div>
         ) : (
           <div className="ipo-list">
+            <IpoListHeader />
             {open.map((ins) => (
-              <IpoRow key={ins.id} instrument={ins} closed={false} today={today} onApply={setSelected} />
+              <IpoRow
+                key={ins.id}
+                instrument={ins}
+                closed={false}
+                today={today}
+                onApply={setSelected}
+                onShowSubscription={(instrument, slug) => setSubscriptionTarget({ instrument, slug })}
+                premium={premiumByInstrumentId[ins.id]}
+              />
             ))}
           </div>
         )}
@@ -254,8 +370,16 @@ export default function IpoList({ onGoToAccounts }) {
             <span className="ipo-section-count">{closed.length}</span>
           </div>
           <div className="ipo-list">
+            <IpoListHeader />
             {closed.map((ins) => (
-              <IpoRow key={ins.id} instrument={ins} closed today={today} onApply={setSelected} />
+              <IpoRow
+                key={ins.id}
+                instrument={ins}
+                closed
+                today={today}
+                onApply={setSelected}
+                premium={premiumByInstrumentId[ins.id]}
+              />
             ))}
           </div>
         </section>
@@ -268,6 +392,14 @@ export default function IpoList({ onGoToAccounts }) {
           onApplied={() => {
             // keep modal open to show per-account results; user closes manually
           }}
+        />
+      )}
+
+      {subscriptionTarget && (
+        <SubscriptionModal
+          instrument={subscriptionTarget.instrument}
+          slug={subscriptionTarget.slug}
+          onClose={() => setSubscriptionTarget(null)}
         />
       )}
     </div>

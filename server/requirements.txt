@@ -7,3 +7,4 @@ cryptography==43.0.1
 pycryptodome==3.20.0
 requests==2.32.3
 playwright==1.47.0
+beautifulsoup4==4.12.3

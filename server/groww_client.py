@@ -6,7 +6,6 @@ import uuid
 
 import requests
 
-import groww_login
 from groww_checksum import generate_checksum
 
 BASE = "https://groww.in"
@@ -130,10 +129,10 @@ def _apply_for_ipo_sync(bearer_token, device_id, nkey, pin_token, symbol, isin, 
     return requests.post(f"{BASE}{url_path}", headers=headers, data=payload_str, timeout=15)
 
 
-def _cancel_order_sync(bearer_token, device_id, nkey, pin_token, order_id, search_id=None, cf_cookies=None):
+def _cancel_order_sync(bearer_token, device_id, nkey, pin_token, order_id, search_id=None):
     url_path = f"/v1/api/stocks_ipo/v1/order/{order_id}/cancel"
     req_id, salt = _req_id_and_salt()
-    checksum = generate_checksum(url_path, None, req_id, salt)
+    checksum = generate_checksum(url_path, "", req_id, salt)
     headers = _common_headers(bearer_token, device_id, nkey, req_id, checksum)
     # Captured from a real cancel: unlike every other endpoint, this one's headers omit
     # x-user-nkey entirely, and the Referer must be the actual order-status page (not just
@@ -144,9 +143,7 @@ def _cancel_order_sync(bearer_token, device_id, nkey, pin_token, order_id, searc
     if search_id:
         headers["referer"] = f"{BASE}/ipo/{search_id}/status/{order_id}"
 
-    return requests.put(
-        f"{BASE}{url_path}", headers=headers, data="", cookies=cf_cookies or {}, timeout=15
-    )
+    return requests.put(f"{BASE}{url_path}", headers=headers, data="", timeout=15)
 
 
 async def _with_pin_retry(account: dict, call_once):
@@ -183,23 +180,10 @@ async def apply_for_ipo(account: dict, symbol: str, isin: str, quantity: int, pr
 
 
 # Cancels a previously submitted IPO application — same "explicit user action only" rule as apply.
-# Groww's cancel endpoint sits behind Cloudflare bot management, which requires __cf_bm/_cfuvid
-# cookies that only a real browser (passing Cloudflare's JS challenge) can obtain — so before
-# cancelling we do a lightweight, non-interactive page load with the account's saved session to
-# pick up fresh cookies, then hand them to the actual cancel request.
 async def cancel_order(account: dict, order_id: str, search_id: str = None):
-    cf_cookies = None
-    if account.get("state_data"):
-        try:
-            status_path = f"/ipo/{search_id}/status/{order_id}" if search_id else "/"
-            cf_cookies = await groww_login.fetch_cf_cookies(account["state_data"], status_path)
-        except Exception:
-            cf_cookies = None
-
     def call_once(pin_token):
         return _cancel_order_sync(
-            account["bearer_token"], account["device_id"], account["nkey"], pin_token, order_id,
-            search_id, cf_cookies,
+            account["bearer_token"], account["device_id"], account["nkey"], pin_token, order_id, search_id
         )
 
     res, refreshed_pin_token = await _with_pin_retry(account, call_once)

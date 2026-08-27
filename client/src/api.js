@@ -14,6 +14,11 @@ async function request(path, options = {}) {
 }
 
 export const api = {
+  authStatus: () => request('/auth/status'),
+  authSetup: (payload) => request('/auth/setup', { method: 'POST', body: JSON.stringify(payload) }),
+  authLogin: (payload) => request('/auth/login', { method: 'POST', body: JSON.stringify(payload) }),
+  authLogout: () => request('/auth/logout', { method: 'POST' }),
+
   listAccounts: () => request('/accounts'),
   addAccount: (payload) => request('/accounts', { method: 'POST', body: JSON.stringify(payload) }),
   updateAccount: (id, payload) => request(`/accounts/${id}`, { method: 'PUT', body: JSON.stringify(payload) }),
@@ -53,6 +58,12 @@ export const api = {
   growwLoginOtp: (payload) => request('/groww/login/otp', { method: 'POST', body: JSON.stringify(payload) }),
   applyGrowwIpo: (accountId, payload) =>
     request(`/groww/accounts/${accountId}/apply`, { method: 'POST', body: JSON.stringify(payload) }),
-  cancelGrowwOrder: (accountId, orderId) =>
-    request(`/groww/accounts/${accountId}/orders/${orderId}`, { method: 'DELETE' }),
+  cancelGrowwOrder: (accountId, orderId, searchId) =>
+    request(
+      `/groww/accounts/${accountId}/orders/${orderId}${searchId ? `?search_id=${encodeURIComponent(searchId)}` : ''}`,
+      { method: 'DELETE' }
+    ),
+
+  getIpoPremiums: () => request('/ipo/premiums'),
+  getIpoSubscriptionDetail: (slug) => request(`/ipo/subscription?slug=${encodeURIComponent(slug)}`),
 };

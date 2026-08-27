@@ -161,27 +161,6 @@ async def submit_otp(session_id: str, otp: str) -> dict:
         await session["playwright"].stop()
 
 
-# --- Fetches a fresh set of Cloudflare bot-management cookies (__cf_bm, _cfuvid, etc.)
-# by loading a real page with the account's saved browser session. These cookies can only
-# be issued by Cloudflare after a real browser runs its JS challenge — a plain HTTP client
-# can never produce them on its own. The browser only navigates here; it never submits or
-# clicks anything, so this isn't itself a state-changing action. ---
-async def fetch_cf_cookies(state_data: dict, path: str = "/") -> dict:
-    playwright = await async_playwright().start()
-    browser = await playwright.chromium.launch(headless=True)
-    context = await browser.new_context(user_agent=_UA, storage_state=state_data)
-    page = await context.new_page()
-
-    try:
-        await page.goto(f"https://groww.in{path}", wait_until="networkidle", timeout=20000)
-        await page.wait_for_timeout(1000)
-        cookies = await context.cookies()
-        return {c["name"]: c["value"] for c in cookies}
-    finally:
-        await browser.close()
-        await playwright.stop()
-
-
 # --- Silent refresh: reuses a previously saved browser session (cookies/storage) to get
 # a fresh bearer token without any OTP — exactly what happens when you revisit a site
 # you're still logged into. Used when the bearer token itself has expired. ---
