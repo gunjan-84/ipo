@@ -438,6 +438,20 @@ a.secondary-btn:hover {
   min-width: 0;
 }
 
+.ipo-row-header {
+  cursor: default;
+  padding: 16px 0 10px;
+  border-bottom: 1px solid var(--border);
+}
+
+.ipo-row-header .ipo-row-col {
+  font-size: 11px;
+  font-weight: 600;
+  letter-spacing: 0.06em;
+  text-transform: uppercase;
+  color: var(--muted);
+}
+
 .ipo-row-instrument {
   flex: 2;
 }
@@ -516,6 +530,36 @@ a.secondary-btn:hover {
   font-variant-numeric: tabular-nums;
 }
 
+.ipo-row-gmp {
+  flex: 1;
+  text-align: right;
+}
+
+.ipo-row-gmp-value {
+  font-weight: 600;
+  font-size: 14px;
+  font-variant-numeric: tabular-nums;
+}
+
+.ipo-row-gmp-value.up {
+  color: var(--ok);
+}
+
+.ipo-row-gmp-value.down {
+  color: var(--danger);
+}
+
+.ipo-row-gmp-value.muted {
+  color: var(--muted);
+  font-weight: 400;
+}
+
+.ipo-row-gmp-sub {
+  font-size: 12px;
+  color: var(--muted);
+  font-variant-numeric: tabular-nums;
+}
+
 .ipo-row-amount {
   flex: 1.2;
   text-align: right;
@@ -549,6 +593,14 @@ a.secondary-btn:hover {
   color: var(--text);
   text-decoration: none;
   white-space: nowrap;
+}
+
+button.ipo-row-details {
+  background: transparent;
+  border: none;
+  padding: 0;
+  font-weight: 400;
+  cursor: pointer;
 }
 
 .ipo-row-details:hover {
@@ -836,6 +888,44 @@ a.secondary-btn:hover {
   display: flex;
   flex-direction: column;
   gap: 14px;
+}
+
+.subscription-detail {
+  display: flex;
+  flex-direction: column;
+  gap: 14px;
+}
+
+.subscription-row-label {
+  display: flex;
+  justify-content: space-between;
+  font-size: 13px;
+  color: var(--text-h);
+  margin-bottom: 6px;
+}
+
+.subscription-row.total .subscription-row-label {
+  font-weight: 700;
+}
+
+.subscription-bar-track {
+  height: 8px;
+  border-radius: 999px;
+  background: var(--border);
+  overflow: hidden;
+}
+
+.subscription-bar-fill {
+  height: 100%;
+  border-radius: 999px;
+  background: linear-gradient(90deg, var(--accent) 0%, var(--ok) 100%);
+}
+
+.subscription-updated {
+  font-size: 12px;
+  color: var(--muted);
+  text-align: center;
+  margin-top: 4px;
 }
 
 .bids-section {
@@ -1132,6 +1222,10 @@ a.secondary-btn:hover {
     padding: 0 14px;
   }
 
+  .ipo-row-header {
+    display: none;
+  }
+
   .ipo-row {
     flex-wrap: wrap;
     gap: 10px;
@@ -1144,6 +1238,7 @@ a.secondary-btn:hover {
 
   .ipo-row-date,
   .ipo-row-price,
+  .ipo-row-gmp,
   .ipo-row-amount {
     flex: 1 1 auto;
   }

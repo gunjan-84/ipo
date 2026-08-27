@@ -10,6 +10,7 @@ from fastapi.responses import JSONResponse
 
 import accounts_store
 import connections_store
+import ipoji_store
 import kfintech_store
 import mufg_store
 import pan_store
@@ -597,3 +598,33 @@ async def check_allotment(client_id: str, registrar: str = REGISTRAR_KFINTECH):
     pan_store.save(pans)
     log.info(f"allotment check: registrar={registrar} client_id={client_id} -> {len(results)} pan(s)")
     return {"status": "success", "data": results}
+
+
+# Expected-premium (GMP) and subscription figures scraped from ipoji.com's homepage cards.
+# Matching against our own instrument names happens client-side (see IpoList.jsx) — this
+# just hands over ipoji's raw list, cached for a few minutes so we don't hammer their site.
+@app.get("/api/ipo/premiums")
+async def get_ipo_premiums():
+    try:
+        entries = await ipoji_store.fetch_entries()
+    except Exception as err:
+        log.warning(f"failed to fetch ipoji premiums: {err}")
+        return {"status": "success", "data": []}
+    return {"status": "success", "data": entries}
+
+
+# Category-wise (QIB/NII/HNI/Retail/Total) live subscription breakdown for one IPO,
+# scraped from its ipoji.com detail page.
+@app.get("/api/ipo/subscription")
+async def get_ipo_subscription(slug: str):
+    try:
+        detail = await ipoji_store.fetch_subscription_detail(slug)
+    except Exception as err:
+        log.warning(f"failed to fetch ipoji subscription detail for {slug}: {err}")
+        return JSONResponse(status_code=502, content={"status": "error", "message": str(err)})
+
+    if not detail:
+        return JSONResponse(
+            status_code=404, content={"status": "error", "message": "No subscription details found for this IPO"}
+        )
+    return {"status": "success", "data": detail}

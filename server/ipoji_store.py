@@ -1,0 +1,148 @@
+import re
+import time
+from difflib import SequenceMatcher
+
+import httpx
+from bs4 import BeautifulSoup
+
+URL = "https://www.ipoji.com/"
+DETAIL_URL = "https://www.ipoji.com/ipo/{slug}"
+_HEADERS = {"User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36"}
+_CACHE_TTL = 300  # seconds — ipoji's GMP/subscription figures don't change fast enough to justify fetching on every page load
+_DETAIL_CACHE_TTL = 60  # subscription is "live" while bidding is open, so refresh more often
+
+_cache = {"entries": [], "fetched_at": 0}
+_detail_cache = {}  # slug -> {"data": {...}, "fetched_at": ts}
+
+_NOISE_WORDS = {"LIMITED", "LTD", "IPO", "SME", "INDIA"}
+
+
+def _normalize(name: str) -> str:
+    n = name.upper()
+    n = re.sub(r"\([^)]*\)", " ", n)
+    n = re.sub(r"[^A-Z0-9 ]", " ", n)
+    tokens = [t for t in n.split() if t not in _NOISE_WORDS]
+    return " ".join(tokens)
+
+
+def _parse(html: str) -> list:
+    soup = BeautifulSoup(html, "html.parser")
+    entries = []
+    for card in soup.select("article.ipo-card"):
+        name_el = card.select_one(".ipo-card-name")
+        if not name_el:
+            continue
+        name = name_el.get_text(strip=True)
+
+        stats = {}
+        for stat in card.select(".ipo-card-body-stat"):
+            label_el = stat.select_one(".ipo-card-secondary-label")
+            value_el = stat.select_one(".ipo-card-body-value")
+            if label_el and value_el:
+                stats[label_el.get_text(strip=True)] = value_el.get_text(" ", strip=True)
+
+        premium_el = card.select_one(".ipo-card-body-left-block .ipo-card-body-value")
+        premium_color = None
+        if premium_el and premium_el.has_attr("style"):
+            if "green" in premium_el["style"]:
+                premium_color = "up"
+            elif "red" in premium_el["style"]:
+                premium_color = "down"
+
+        # Listed IPOs carry a footer like "Listing Price : ₹137.0 at a Discount of 0.72%"
+        # instead of the Exp. Premium stat (which only applies before listing).
+        footer_el = card.select_one(".ipo-card-footer-text")
+        listing_note = footer_el.get_text(" ", strip=True) if footer_el else None
+        listing_direction = None
+        if listing_note:
+            lowered = listing_note.lower()
+            if "premium" in lowered:
+                listing_direction = "up"
+            elif "discount" in lowered:
+                listing_direction = "down"
+
+        href = card.get("data-agent-href", "")
+        entries.append(
+            {
+                "name": name,
+                "slug": href.rsplit("/", 1)[-1] if href else None,
+                "status": card.get("data-ipo-status"),
+                "subscription": stats.get("Subscription"),
+                "exp_premium": stats.get("Exp. Premium"),
+                "premium_direction": premium_color,
+                "list_price": stats.get("List Price"),
+                "listing_date": stats.get("Listing Date"),
+                "listing_note": listing_note,
+                "listing_direction": listing_direction,
+            }
+        )
+    return entries
+
+
+async def fetch_entries(force: bool = False) -> list:
+    now = time.time()
+    if not force and _cache["entries"] and now - _cache["fetched_at"] < _CACHE_TTL:
+        return _cache["entries"]
+
+    async with httpx.AsyncClient(timeout=15) as client:
+        res = await client.get(URL, headers=_HEADERS)
+        res.raise_for_status()
+
+    entries = _parse(res.text)
+    _cache["entries"] = entries
+    _cache["fetched_at"] = now
+    return entries
+
+
+def _parse_subscription_detail(html: str) -> dict | None:
+    soup = BeautifulSoup(html, "html.parser")
+    card = soup.select_one("#subscription")
+    if not card:
+        return None
+
+    heading_el = card.select_one("h2")
+    heading = heading_el.get_text(strip=True) if heading_el else None
+
+    categories = []
+    for row in card.select(".status-progress"):
+        classes = row.get("class", [])
+        if "d-block" in classes and "d-md-none" in classes:
+            continue  # mobile-only duplicate of a row already shown in the desktop columns
+        spans = row.select(".progress-label span")
+        if len(spans) < 2:
+            continue
+        label = spans[0].get_text(strip=True)
+        value = spans[1].get_text(strip=True)
+        categories.append({"label": label, "value": value, "is_total": label.strip().lower() == "total"})
+
+    time_el = card.select_one("time")
+    updated_at = time_el.get_text(strip=True) if time_el else None
+
+    if not categories:
+        return None
+    return {"heading": heading, "categories": categories, "updated_at": updated_at}
+
+
+async def fetch_subscription_detail(slug: str, force: bool = False) -> dict | None:
+    now = time.time()
+    cached = _detail_cache.get(slug)
+    if not force and cached and now - cached["fetched_at"] < _DETAIL_CACHE_TTL:
+        return cached["data"]
+
+    async with httpx.AsyncClient(timeout=15) as client:
+        res = await client.get(DETAIL_URL.format(slug=slug), headers=_HEADERS)
+        res.raise_for_status()
+
+    data = _parse_subscription_detail(res.text)
+    _detail_cache[slug] = {"data": data, "fetched_at": now}
+    return data
+
+
+def find_match(name: str, entries: list, threshold: float = 0.6):
+    target = _normalize(name)
+    best, best_score = None, 0.0
+    for entry in entries:
+        score = SequenceMatcher(None, target, _normalize(entry["name"])).ratio()
+        if score > best_score:
+            best, best_score = entry, score
+    return (best, best_score) if best and best_score >= threshold else (None, best_score)

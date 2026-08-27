@@ -41,4 +41,6 @@ export const api = {
   listRegistryIpos: () => request('/ipo/registry'),
   checkAllotment: (clientId, registrar) =>
     request(`/ipo/allotment?client_id=${encodeURIComponent(clientId)}&registrar=${encodeURIComponent(registrar)}`),
+  getIpoPremiums: () => request('/ipo/premiums'),
+  getIpoSubscriptionDetail: (slug) => request(`/ipo/subscription?slug=${encodeURIComponent(slug)}`),
 };
