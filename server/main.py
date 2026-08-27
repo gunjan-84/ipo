@@ -12,6 +12,7 @@ from fastapi.responses import JSONResponse
 import accounts_store
 import auth_store
 import connections_store
+import groww_bids_store
 import groww_client
 import groww_login
 import groww_store
@@ -44,6 +45,7 @@ upis = upi_store.load()  # [{id, upi_id, label}]
 pans = pan_store.load()  # [{id, pan, label}] — shared PAN list, used for allotment checks
 kfintech_store.load()  # [{name, value}] — KFintech's "Select IPO" dropdown, scraped from ipostatus.kfintech.com
 groww_accounts = groww_store.load()  # [{id, label, bearer_token, device_id, nkey, pin, pin_token}]
+groww_bids = groww_bids_store.load()  # [{account_id, symbol, quantity, price, applied_at}]
 auth_record = auth_store.load()  # {username, salt, password_hash} or None until first-run setup
 
 
@@ -922,7 +924,23 @@ async def get_groww_orders(account_id: str):
         groww_store.save(groww_accounts)
         log.info(f"groww PIN token refreshed for {account['label']}")
 
+    attach_groww_bid_info(account_id, orders)
     return {"status": "success", "data": orders}
+
+
+# Matches each order against our own record of what we submitted at apply-time (see
+# apply_groww_ipo below) — same account, same symbol, closest submission time — since
+# Groww's order-list API never echoes back the bid quantity/price it was placed at.
+def attach_groww_bid_info(account_id: str, orders: list):
+    candidates = [b for b in groww_bids if b["account_id"] == account_id]
+    for order in orders:
+        matches = [b for b in candidates if b["symbol"] == order.get("symbol")]
+        if not matches:
+            continue
+        best = min(matches, key=lambda b: abs(b["applied_at"] - (order.get("orderTimeStamp") or 0)))
+        if abs(best["applied_at"] - (order.get("orderTimeStamp") or 0)) < 10 * 60 * 1000:
+            order["bidQuantity"] = best["quantity"]
+            order["bidPrice"] = best["price"]
 
 
 # Applies for an IPO on a Groww account — only ever called by an explicit "Apply" click.
@@ -955,6 +973,12 @@ async def apply_groww_ipo(account_id: str, payload: dict):
     if refreshed_pin_token:
         account["pin_token"] = refreshed_pin_token
     groww_store.save(groww_accounts)
+
+    groww_bids.append(
+        {"account_id": account_id, "symbol": symbol, "quantity": quantity, "price": price, "applied_at": time.time() * 1000}
+    )
+    groww_bids_store.save(groww_bids)
+
     log.info(f"groww apply result for {account['label']} ({symbol}): success")
     return {"status": "success", "data": data}
 

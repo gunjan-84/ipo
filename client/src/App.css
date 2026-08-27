@@ -807,8 +807,24 @@ button.ipo-row-details {
 
 .applications-table {
   width: 100%;
+  table-layout: fixed;
   border-collapse: collapse;
   font-size: 13px;
+}
+
+.applications-table col.col-symbol { width: 22%; }
+.applications-table col.col-status { width: 14%; }
+.applications-table col.col-bid { width: 16%; }
+.applications-table col.col-amount { width: 14%; }
+.applications-table col.col-payment { width: 18%; }
+.applications-table col.col-applied { width: 14%; }
+.applications-table col.col-actions { width: 90px; }
+
+.applications-table td .cell-title,
+.applications-table td .cell-sub {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
 }
 
 .applications-table th {

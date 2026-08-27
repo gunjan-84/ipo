@@ -47,8 +47,8 @@ function normalizeGrowwOrder(o) {
     symbol: o.symbol,
     exchange: o.companyName,
     status,
-    bids: null,
-    amount_blocked: null,
+    bids: o.bidQuantity && o.bidPrice ? [{ quantity: o.bidQuantity, price: o.bidPrice }] : null,
+    amount_blocked: o.bidQuantity && o.bidPrice ? o.bidQuantity * o.bidPrice : null,
     payment_status: o.remark || null,
     created_at: o.orderTimeStamp,
     cancellable: !['cancelled', 'rejected', 'allotted', 'not allotted'].includes(status),
@@ -94,6 +94,15 @@ function AccountApplications({ group, filtered, hasActiveFilter, onCancelled }) 
       ) : (
         <div className="applications-table-wrap">
           <table className="applications-table">
+            <colgroup>
+              <col className="col-symbol" />
+              <col className="col-status" />
+              <col className="col-bid" />
+              <col className="col-amount" />
+              <col className="col-payment" />
+              <col className="col-applied" />
+              <col className="col-actions" />
+            </colgroup>
             <thead>
               <tr>
                 <th>Symbol</th>
