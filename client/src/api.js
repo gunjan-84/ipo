@@ -14,6 +14,11 @@ async function request(path, options = {}) {
 }
 
 export const api = {
+  authStatus: () => request('/auth/status'),
+  authSetup: (payload) => request('/auth/setup', { method: 'POST', body: JSON.stringify(payload) }),
+  authLogin: (payload) => request('/auth/login', { method: 'POST', body: JSON.stringify(payload) }),
+  authLogout: () => request('/auth/logout', { method: 'POST' }),
+
   listAccounts: () => request('/accounts'),
   addAccount: (payload) => request('/accounts', { method: 'POST', body: JSON.stringify(payload) }),
   updateAccount: (id, payload) => request(`/accounts/${id}`, { method: 'PUT', body: JSON.stringify(payload) }),

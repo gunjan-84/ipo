@@ -1,14 +1,16 @@
 import asyncio
 import re
+import secrets
 import time
 import uuid
 
 import httpx
-from fastapi import FastAPI, Request
+from fastapi import FastAPI, Request, Response
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import JSONResponse
 
 import accounts_store
+import auth_store
 import connections_store
 import ipoji_store
 import kfintech_store
@@ -17,6 +19,9 @@ import pan_store
 import upi_store
 from logging_config import log
 from totp_util import generate_totp
+
+SESSION_TTL_SECONDS = 60 * 60 * 24 * 30  # 30 days — personal-use tool, long-lived login is fine
+_PUBLIC_AUTH_PATHS = {"/api/auth/status", "/api/auth/setup", "/api/auth/login"}
 
 KITE_BASE = "https://kite.zerodha.com"
 KFINTECH_STATUS_URL = "https://0uz601ms56.execute-api.ap-south-1.amazonaws.com/prod/api/query"
@@ -35,6 +40,18 @@ accounts = accounts_store.load()  # [{id, label, user_id, password, totp_secret}
 upis = upi_store.load()  # [{id, upi_id, label}]
 pans = pan_store.load()  # [{id, pan, label}] — shared PAN list, used for allotment checks
 kfintech_store.load()  # [{name, value}] — KFintech's "Select IPO" dropdown, scraped from ipostatus.kfintech.com
+auth_record = auth_store.load()  # {username, salt, password_hash} or None until first-run setup
+
+
+async def create_session(username: str) -> str:
+    token = secrets.token_urlsafe(32)
+    await connections_store.client.set(f"session:{token}", username, ex=SESSION_TTL_SECONDS)
+    return token
+
+
+async def session_username(request: Request):
+    token = request.cookies.get("session_token")
+    return await connections_store.client.get(f"session:{token}") if token else None
 
 
 @app.middleware("http")
@@ -46,10 +63,75 @@ async def log_requests(request: Request, call_next):
     return response
 
 
+# Gate every /api/* route behind a login, except the handful needed to set up or perform that login.
+@app.middleware("http")
+async def auth_gate(request: Request, call_next):
+    path = request.url.path
+    if request.method == "OPTIONS" or not path.startswith("/api/") or path in _PUBLIC_AUTH_PATHS:
+        return await call_next(request)
+    if not await session_username(request):
+        return JSONResponse(status_code=401, content={"status": "error", "message": "Not authenticated"})
+    return await call_next(request)
+
+
 @app.on_event("startup")
 async def on_startup():
     await connections_store.client.ping()
     log.info("Connected to Redis")
+
+
+# --- App login (protects every route above) ---
+@app.get("/api/auth/status")
+async def auth_status(request: Request):
+    username = await session_username(request)
+    return {
+        "status": "success",
+        "data": {"configured": auth_record is not None, "authenticated": username is not None, "username": username},
+    }
+
+
+# Only works once, before any credentials exist — sets the single app login and signs you in.
+@app.post("/api/auth/setup")
+async def auth_setup(payload: dict, response: Response):
+    global auth_record
+    if auth_record is not None:
+        return JSONResponse(status_code=400, content={"status": "error", "message": "Login is already set up"})
+
+    username = (payload.get("username") or "").strip()
+    password = payload.get("password") or ""
+    if not username or len(password) < 6:
+        return JSONResponse(
+            status_code=400,
+            content={"status": "error", "message": "username is required and password must be at least 6 characters"},
+        )
+
+    auth_record = auth_store.save(username, password)
+    token = await create_session(username)
+    response.set_cookie("session_token", token, httponly=True, samesite="lax", max_age=SESSION_TTL_SECONDS)
+    log.info(f"app login configured for {username}")
+    return {"status": "success", "data": {"username": username}}
+
+
+@app.post("/api/auth/login")
+async def auth_login(payload: dict, response: Response):
+    username = (payload.get("username") or "").strip()
+    password = payload.get("password") or ""
+    if not auth_store.verify(auth_record, username, password):
+        return JSONResponse(status_code=401, content={"status": "error", "message": "Invalid username or password"})
+
+    token = await create_session(username)
+    response.set_cookie("session_token", token, httponly=True, samesite="lax", max_age=SESSION_TTL_SECONDS)
+    log.info(f"login: {username}")
+    return {"status": "success", "data": {"username": username}}
+
+
+@app.post("/api/auth/logout")
+async def auth_logout(request: Request, response: Response):
+    token = request.cookies.get("session_token")
+    if token:
+        await connections_store.client.delete(f"session:{token}")
+    response.delete_cookie("session_token")
+    return {"status": "success"}
 
 
 def find_account(account_id: str):

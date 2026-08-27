@@ -4,6 +4,19 @@
   flex-direction: column;
 }
 
+.login-page {
+  min-height: 100svh;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  padding: 20px;
+  background: var(--bg);
+}
+
+.login-card {
+  width: 100%;
+}
+
 .page-loading,
 .panel-loading {
   padding: 40px;
