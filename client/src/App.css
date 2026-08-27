@@ -24,6 +24,41 @@
   color: var(--text);
 }
 
+.inline-loader {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 16px 0;
+  color: var(--muted);
+  font-size: 13px;
+}
+
+.spinner {
+  width: 14px;
+  height: 14px;
+  flex: none;
+  border: 2px solid var(--border);
+  border-top-color: var(--text);
+  border-radius: 50%;
+  animation: spin 0.7s linear infinite;
+}
+
+@keyframes spin {
+  to { transform: rotate(360deg); }
+}
+
+.status-pill-checking {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+}
+
+.status-pill-checking .spinner {
+  width: 10px;
+  height: 10px;
+  border-width: 2px;
+}
+
 .subtitle {
   color: var(--text);
   font-size: 13px;
@@ -500,13 +535,23 @@ a.secondary-btn:hover {
 }
 
 .type-tag-ipo {
-  border-color: var(--border);
-  color: var(--muted);
+  border-color: #2563eb;
+  color: #2563eb;
 }
 
 .type-tag-sme {
-  border-color: var(--sme-border);
-  color: var(--sme);
+  border-color: #8b5cf6;
+  color: #8b5cf6;
+}
+
+.type-tag-zerodha {
+  border-color: #f97316;
+  color: #f97316;
+}
+
+.type-tag-groww {
+  border-color: #2563eb;
+  color: #2563eb;
 }
 
 .ipo-row-date {
@@ -821,10 +866,16 @@ button.ipo-row-details {
 .applications-table col.col-actions { width: 90px; }
 
 .applications-table td .cell-title,
-.applications-table td .cell-sub {
+.applications-table td .cell-sub,
+.applications-table td.cell-sub {
   overflow: hidden;
   text-overflow: ellipsis;
   white-space: nowrap;
+}
+
+.applications-table td.cell-payment {
+  white-space: normal;
+  overflow-wrap: break-word;
 }
 
 .applications-table th {

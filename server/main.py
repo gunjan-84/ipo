@@ -438,6 +438,24 @@ async def get_instruments():
 
 
 # --- Applications across every connected account, tagged by account ---
+async def fetch_kite_applications_for(account: dict) -> dict:
+    meta = {"id": account["id"], "label": account["label"], "user_id": account["user_id"]}
+    conn = await connections_store.get(account["id"])
+    try:
+        async with httpx.AsyncClient(timeout=15) as client:
+            res = await client.get(
+                f"{KITE_BASE}/oms/ipo/applications", headers={"Authorization": f"enctoken {conn['encToken']}"}
+            )
+            body = res.json()
+        if await is_auth_error(body, account["id"]):
+            return {"account": meta, "applications": [], "error": "Session expired — reconnect this account"}
+        if body.get("status") == "success":
+            return {"account": meta, "applications": body.get("data", []), "error": None}
+        return {"account": meta, "applications": [], "error": body.get("message", "Failed to load applications")}
+    except Exception as err:
+        return {"account": meta, "applications": [], "error": str(err)}
+
+
 @app.get("/api/ipo/applications")
 async def get_applications():
     connected_ids = set(await connections_store.connected_account_ids())
@@ -445,29 +463,29 @@ async def get_applications():
     if not connected_accounts:
         return {"status": "success", "data": []}
 
-    async def fetch_for(account):
-        meta = {"id": account["id"], "label": account["label"], "user_id": account["user_id"]}
-        conn = await connections_store.get(account["id"])
-        try:
-            async with httpx.AsyncClient(timeout=15) as client:
-                res = await client.get(
-                    f"{KITE_BASE}/oms/ipo/applications", headers={"Authorization": f"enctoken {conn['encToken']}"}
-                )
-                body = res.json()
-            if await is_auth_error(body, account["id"]):
-                return {"account": meta, "applications": [], "error": "Session expired — reconnect this account"}
-            if body.get("status") == "success":
-                return {"account": meta, "applications": body.get("data", []), "error": None}
-            return {"account": meta, "applications": [], "error": body.get("message", "Failed to load applications")}
-        except Exception as err:
-            return {"account": meta, "applications": [], "error": str(err)}
-
     try:
-        groups = await asyncio.gather(*(fetch_for(a) for a in connected_accounts))
+        groups = await asyncio.gather(*(fetch_kite_applications_for(a) for a in connected_accounts))
         return {"status": "success", "data": groups}
     except Exception as err:
         log.exception("get_applications failed")
         return JSONResponse(status_code=500, content={"status": "error", "message": str(err)})
+
+
+# Single-account variant so the frontend can pull each account's applications
+# independently and render them as they arrive, instead of waiting for the slowest
+# account in the bulk /ipo/applications call.
+@app.get("/api/accounts/{account_id}/ipo/applications")
+async def get_applications_for_account(account_id: str):
+    account = find_account(account_id)
+    if not account:
+        return JSONResponse(status_code=404, content={"status": "error", "message": "Account not found"})
+    connected_ids = set(await connections_store.connected_account_ids())
+    if account_id not in connected_ids:
+        meta = {"id": account["id"], "label": account["label"], "user_id": account["user_id"]}
+        return {"status": "success", "data": {"account": meta, "applications": [], "error": "Not connected"}}
+
+    group = await fetch_kite_applications_for(account)
+    return {"status": "success", "data": group}
 
 
 # --- Apply to an IPO on behalf of one or more connected accounts ---
@@ -657,6 +675,21 @@ async def check_ipo_status(pan: str, name: str = None, client_id: str = None):
 
 
 # Allotment check across every saved account that has a PAN on file, for one IPO.
+async def fetch_allotment_for(entry: dict, client_id: str, registrar: str) -> dict:
+    result = await query_registrar_status(registrar, client_id, entry["pan"])
+    # First real hit for a still-unnamed PAN: adopt KFintech's applicant name as its label.
+    if result["rows"] and entry.get("label", "Unknown") == "Unknown":
+        applicant_name = result["rows"][0].get("Name")
+        if applicant_name:
+            entry["label"] = applicant_name.strip().title()
+    return {
+        "pan_entry": {"id": entry["id"], "pan": entry["pan"], "label": entry.get("label", "")},
+        "data": result["rows"],
+        "not_applied": result["not_applied"],
+        "error": result["error"],
+    }
+
+
 @app.get("/api/ipo/allotment")
 async def check_allotment(client_id: str, registrar: str = REGISTRAR_KFINTECH):
     if not client_id:
@@ -668,24 +701,27 @@ async def check_allotment(client_id: str, registrar: str = REGISTRAR_KFINTECH):
             content={"status": "error", "message": "No PAN numbers saved yet — add one under PAN Numbers"},
         )
 
-    async def fetch_for(entry):
-        result = await query_registrar_status(registrar, client_id, entry["pan"])
-        # First real hit for a still-unnamed PAN: adopt KFintech's applicant name as its label.
-        if result["rows"] and entry.get("label", "Unknown") == "Unknown":
-            applicant_name = result["rows"][0].get("Name")
-            if applicant_name:
-                entry["label"] = applicant_name.strip().title()
-        return {
-            "pan_entry": {"id": entry["id"], "pan": entry["pan"], "label": entry.get("label", "")},
-            "data": result["rows"],
-            "not_applied": result["not_applied"],
-            "error": result["error"],
-        }
-
-    results = await asyncio.gather(*(fetch_for(p) for p in pans))
+    results = await asyncio.gather(*(fetch_allotment_for(p, client_id, registrar) for p in pans))
     pan_store.save(pans)
     log.info(f"allotment check: registrar={registrar} client_id={client_id} -> {len(results)} pan(s)")
     return {"status": "success", "data": results}
+
+
+# Single-PAN variant so the frontend can check each saved PAN independently and
+# render results as they arrive, instead of waiting for the slowest PAN in the
+# bulk /ipo/allotment call.
+@app.get("/api/ipo/allotment/pan/{pan_id}")
+async def check_allotment_for_pan(pan_id: str, client_id: str, registrar: str = REGISTRAR_KFINTECH):
+    if not client_id:
+        return JSONResponse(status_code=400, content={"status": "error", "message": "client_id is required"})
+
+    entry = next((p for p in pans if p["id"] == pan_id), None)
+    if not entry:
+        return JSONResponse(status_code=404, content={"status": "error", "message": "PAN not found"})
+
+    result = await fetch_allotment_for(entry, client_id, registrar)
+    pan_store.save(pans)
+    return {"status": "success", "data": result}
 
 
 # --- Groww: bearer_token/device_id/nkey are captured once by driving Groww's real login

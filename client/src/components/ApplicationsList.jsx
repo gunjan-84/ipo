@@ -87,7 +87,11 @@ function AccountApplications({ group, filtered, hasActiveFilter, onCancelled }) 
       {group.error && <div className="error">{group.error}</div>}
       {error && <div className="error">{error}</div>}
 
-      {filtered.length === 0 ? (
+      {group.loading ? (
+        <div className="inline-loader">
+          <span className="spinner" /> Loading applications…
+        </div>
+      ) : filtered.length === 0 ? (
         <div className="empty-state">
           {hasActiveFilter ? 'No applications match the current filter.' : 'No applications for this account.'}
         </div>
@@ -133,7 +137,7 @@ function AccountApplications({ group, filtered, hasActiveFilter, onCancelled }) 
                     </td>
                     <td>{bid ? `${bid.quantity} @ ₹${bid.price}` : '—'}</td>
                     <td>{app.amount_blocked ? `₹${app.amount_blocked.toLocaleString('en-IN')}` : '—'}</td>
-                    <td className="cell-sub">{app.payment_status || '—'}</td>
+                    <td className="cell-payment">{app.payment_status || '—'}</td>
                     <td className="cell-sub">{formatDateTime(app.created_at)}</td>
                     <td>
                       {cancellable && (
@@ -165,39 +169,84 @@ export default function ApplicationsList({ onGoToAccounts }) {
   const [accountFilter, setAccountFilter] = useState('all');
   const [sortOrder, setSortOrder] = useState('newest');
 
+  // Fetches each account's applications independently — the account list resolves fast
+  // and renders immediately with a per-account loader, then each account's applications
+  // fill in as its own request completes, instead of the whole page waiting on whichever
+  // account is slowest.
+  function updateGroup(accountId, patch) {
+    setGroups((prev) => prev.map((g) => (g.account.id === accountId ? { ...g, ...patch } : g)));
+  }
+
+  async function loadZerodhaAccount(account) {
+    try {
+      const res = await api.getApplicationsForAccount(account.id);
+      const g = res.data;
+      updateGroup(account.id, {
+        applications: (g.applications || []).map((a) => ({ ...a, status: normalizeStatus(a.status) })),
+        error: g.error,
+        loading: false,
+      });
+    } catch (err) {
+      updateGroup(account.id, { applications: [], error: err.message, loading: false });
+    }
+  }
+
+  async function loadGrowwAccount(account) {
+    try {
+      const res = await api.getGrowwOrders(account.id);
+      updateGroup(account.id, {
+        applications: (res.data || []).map(normalizeGrowwOrder),
+        error: null,
+        loading: false,
+      });
+    } catch (err) {
+      updateGroup(account.id, { applications: [], error: err.message, loading: false });
+    }
+  }
+
   async function load() {
     setLoading(true);
     setError('');
     try {
-      const [kiteRes, growwAccRes] = await Promise.all([api.getApplications(), api.listGrowwAccounts()]);
+      const [accountsRes, growwAccRes] = await Promise.all([api.listAccounts(), api.listGrowwAccounts()]);
 
-      const kiteGroups = (kiteRes.data || []).map((g) => ({
-        account: { ...g.account, broker: 'zerodha' },
-        applications: g.applications.map((a) => ({ ...a, status: normalizeStatus(a.status) })),
-        error: g.error,
-      }));
-
+      const zerodhaAccounts = (accountsRes.data || []).filter((a) => a.connected);
       const growwAccounts = growwAccRes.data || [];
-      const growwGroups = await Promise.all(
-        growwAccounts.map(async (acc) => {
-          try {
-            const res = await api.getGrowwOrders(acc.id);
-            return {
-              account: { ...acc, broker: 'groww' },
-              applications: (res.data || []).map(normalizeGrowwOrder),
-              error: null,
-            };
-          } catch (err) {
-            return { account: { ...acc, broker: 'groww' }, applications: [], error: err.message };
-          }
-        })
-      );
 
-      setGroups([...kiteGroups, ...growwGroups]);
+      const initialGroups = [
+        ...zerodhaAccounts.map((acc) => ({
+          account: { ...acc, broker: 'zerodha' },
+          applications: [],
+          error: null,
+          loading: true,
+        })),
+        ...growwAccounts.map((acc) => ({
+          account: { ...acc, broker: 'groww' },
+          applications: [],
+          error: null,
+          loading: true,
+        })),
+      ];
+
+      setGroups(initialGroups);
+      setLoading(false);
+
+      zerodhaAccounts.forEach((acc) => loadZerodhaAccount(acc));
+      growwAccounts.forEach((acc) => loadGrowwAccount(acc));
     } catch (err) {
       setError(err.message);
-    } finally {
       setLoading(false);
+    }
+  }
+
+  function refreshAccount(accountId) {
+    const group = groups.find((g) => g.account.id === accountId);
+    if (!group) return;
+    updateGroup(accountId, { loading: true, error: null });
+    if (group.account.broker === 'groww') {
+      loadGrowwAccount(group.account);
+    } else {
+      loadZerodhaAccount(group.account);
     }
   }
 
@@ -310,7 +359,7 @@ export default function ApplicationsList({ onGoToAccounts }) {
                     return sortOrder === 'newest' ? -diff : diff;
                   })}
                 hasActiveFilter={hasActiveFilter}
-                onCancelled={load}
+                onCancelled={() => refreshAccount(group.account.id)}
               />
             ))}
           </div>

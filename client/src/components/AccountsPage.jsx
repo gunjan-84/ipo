@@ -493,7 +493,7 @@ export default function AccountsPage() {
               <div className="account-row">
                 <div>
                   <div className="cell-title">
-                    {acc.label} <span className="type-tag type-tag-ipo">ZERODHA</span>
+                    {acc.label} <span className="type-tag type-tag-zerodha">ZERODHA</span>
                   </div>
                   <div className="cell-sub">{acc.user_id}</div>
                 </div>
@@ -529,7 +529,7 @@ export default function AccountsPage() {
               <div className="account-row">
                 <div>
                   <div className="cell-title">
-                    {acc.label} <span className="type-tag type-tag-sme">GROWW</span>
+                    {acc.label} <span className="type-tag type-tag-groww">GROWW</span>
                   </div>
                 </div>
                 <span className={`status-badge ${acc.connected ? 'status-ongoing' : 'status-closed'}`}>

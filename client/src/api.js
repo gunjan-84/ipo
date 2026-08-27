@@ -38,6 +38,7 @@ export const api = {
 
   getInstruments: () => request('/ipo/instruments'),
   getApplications: () => request('/ipo/applications'),
+  getApplicationsForAccount: (accountId) => request(`/accounts/${accountId}/ipo/applications`),
   apply: (payload) => request('/ipo/apply', { method: 'POST', body: JSON.stringify(payload) }),
   cancel: (accountId, appId) => request(`/accounts/${accountId}/ipo/applications/${appId}`, { method: 'DELETE' }),
   checkIpoStatus: ({ name, pan }) =>
@@ -46,6 +47,10 @@ export const api = {
   listRegistryIpos: () => request('/ipo/registry'),
   checkAllotment: (clientId, registrar) =>
     request(`/ipo/allotment?client_id=${encodeURIComponent(clientId)}&registrar=${encodeURIComponent(registrar)}`),
+  checkAllotmentForPan: (panId, clientId, registrar) =>
+    request(
+      `/ipo/allotment/pan/${panId}?client_id=${encodeURIComponent(clientId)}&registrar=${encodeURIComponent(registrar)}`
+    ),
 
   listGrowwAccounts: () => request('/groww/accounts'),
   addGrowwAccount: (payload) => request('/groww/accounts', { method: 'POST', body: JSON.stringify(payload) }),
