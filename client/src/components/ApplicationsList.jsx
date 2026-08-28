@@ -14,16 +14,62 @@ function formatDateTime(d) {
   }
 }
 
+// Brokers spell the same status differently (camelCase, SCREAMING_SNAKE, extra
+// whitespace, ...). Canonicalize to "lowercase words separated by single spaces"
+// so e.g. Kite's raw status and Groww's orderStatus land on the same string
+// ("not allotted") and get grouped into the same section/tab/stat-tile instead
+// of splitting into broker-specific duplicates.
+// Some brokers also just spell a status differently outright (Groww sends the
+// misspelled "Not Alloted"). Map known variants to one canonical spelling.
+const STATUS_ALIASES = {
+  'not alloted': 'not allotted',
+  'payment pending': 'submitted',
+};
+
+function normalizeStatus(raw) {
+  if (!raw) return '';
+  const cleaned = String(raw)
+    .replace(/([a-z])([A-Z])/g, '$1 $2')
+    .toLowerCase()
+    .replace(/[_-]+/g, ' ')
+    .replace(/\s+/g, ' ')
+    .trim();
+  return STATUS_ALIASES[cleaned] || cleaned;
+}
+
+// Groww's order-list endpoint doesn't return bid qty/price/amount the way Kite's
+// applications do — normalize what's available into the same shape so both brokers
+// render through one table/filter/sort pipeline.
+function normalizeGrowwOrder(o) {
+  const status = normalizeStatus(o.orderStatus);
+  return {
+    id: o.growwOrderId,
+    symbol: o.symbol,
+    exchange: o.companyName,
+    status,
+    bids: o.bidQuantity && o.bidPrice ? [{ quantity: o.bidQuantity, price: o.bidPrice }] : null,
+    amount_blocked: o.bidQuantity && o.bidPrice ? o.bidQuantity * o.bidPrice : null,
+    payment_status: o.remark || null,
+    created_at: o.orderTimeStamp,
+    cancellable: !['cancelled', 'rejected', 'allotted', 'not allotted'].includes(status),
+  };
+}
+
 function AccountApplications({ group, filtered, hasActiveFilter, onCancelled }) {
   const [cancellingId, setCancellingId] = useState(null);
   const [error, setError] = useState('');
+  const isGroww = group.account.broker === 'groww';
 
   async function handleCancel(app) {
     if (!confirm(`Cancel ${group.account.label}'s application for ${app.symbol}?`)) return;
     setCancellingId(app.id);
     setError('');
     try {
-      await api.cancel(group.account.id, app.id);
+      if (isGroww) {
+        await api.cancelGrowwOrder(group.account.id, app.id);
+      } else {
+        await api.cancel(group.account.id, app.id);
+      }
       onCancelled();
     } catch (err) {
       setError(err.message);
@@ -35,19 +81,32 @@ function AccountApplications({ group, filtered, hasActiveFilter, onCancelled }) 
   return (
     <div className="account-group">
       <h3 className="account-group-title">
-        {group.account.label} <span className="cell-sub">({group.account.user_id})</span>
+        {group.account.label} <span className="cell-sub">({isGroww ? 'Groww' : group.account.user_id})</span>
       </h3>
 
       {group.error && <div className="error">{group.error}</div>}
       {error && <div className="error">{error}</div>}
 
-      {filtered.length === 0 ? (
+      {group.loading ? (
+        <div className="inline-loader">
+          <span className="spinner" /> Loading applications…
+        </div>
+      ) : filtered.length === 0 ? (
         <div className="empty-state">
           {hasActiveFilter ? 'No applications match the current filter.' : 'No applications for this account.'}
         </div>
       ) : (
         <div className="applications-table-wrap">
           <table className="applications-table">
+            <colgroup>
+              <col className="col-symbol" />
+              <col className="col-status" />
+              <col className="col-bid" />
+              <col className="col-amount" />
+              <col className="col-payment" />
+              <col className="col-applied" />
+              <col className="col-actions" />
+            </colgroup>
             <thead>
               <tr>
                 <th>Symbol</th>
@@ -62,6 +121,9 @@ function AccountApplications({ group, filtered, hasActiveFilter, onCancelled }) 
             <tbody>
               {filtered.map((app) => {
                 const bid = app.bids?.[0];
+                const cancellable = app.bids
+                  ? !['cancelled', 'allotted', 'not allotted'].includes(app.status)
+                  : app.cancellable;
                 return (
                   <tr key={app.id}>
                     <td>
@@ -69,16 +131,16 @@ function AccountApplications({ group, filtered, hasActiveFilter, onCancelled }) 
                       <div className="cell-sub">{app.exchange}</div>
                     </td>
                     <td>
-                      <span className={`status-badge status-app-${app.status.replace(' ', '-')}`}>
+                      <span className={`status-badge status-app-${app.status.replace(/ /g, '-')}`}>
                         {app.status}
                       </span>
                     </td>
                     <td>{bid ? `${bid.quantity} @ ₹${bid.price}` : '—'}</td>
                     <td>{app.amount_blocked ? `₹${app.amount_blocked.toLocaleString('en-IN')}` : '—'}</td>
-                    <td className="cell-sub">{app.payment_status || '—'}</td>
+                    <td className="cell-payment">{app.payment_status || '—'}</td>
                     <td className="cell-sub">{formatDateTime(app.created_at)}</td>
                     <td>
-                      {!['cancelled', 'allotted', 'not allotted'].includes(app.status) && (
+                      {cancellable && (
                         <button
                           className="danger-btn"
                           disabled={cancellingId === app.id}
@@ -107,16 +169,84 @@ export default function ApplicationsList({ onGoToAccounts }) {
   const [accountFilter, setAccountFilter] = useState('all');
   const [sortOrder, setSortOrder] = useState('newest');
 
+  // Fetches each account's applications independently — the account list resolves fast
+  // and renders immediately with a per-account loader, then each account's applications
+  // fill in as its own request completes, instead of the whole page waiting on whichever
+  // account is slowest.
+  function updateGroup(accountId, patch) {
+    setGroups((prev) => prev.map((g) => (g.account.id === accountId ? { ...g, ...patch } : g)));
+  }
+
+  async function loadZerodhaAccount(account) {
+    try {
+      const res = await api.getApplicationsForAccount(account.id);
+      const g = res.data;
+      updateGroup(account.id, {
+        applications: (g.applications || []).map((a) => ({ ...a, status: normalizeStatus(a.status) })),
+        error: g.error,
+        loading: false,
+      });
+    } catch (err) {
+      updateGroup(account.id, { applications: [], error: err.message, loading: false });
+    }
+  }
+
+  async function loadGrowwAccount(account) {
+    try {
+      const res = await api.getGrowwOrders(account.id);
+      updateGroup(account.id, {
+        applications: (res.data || []).map(normalizeGrowwOrder),
+        error: null,
+        loading: false,
+      });
+    } catch (err) {
+      updateGroup(account.id, { applications: [], error: err.message, loading: false });
+    }
+  }
+
   async function load() {
     setLoading(true);
     setError('');
     try {
-      const res = await api.getApplications();
-      setGroups(res.data || []);
+      const [accountsRes, growwAccRes] = await Promise.all([api.listAccounts(), api.listGrowwAccounts()]);
+
+      const zerodhaAccounts = (accountsRes.data || []).filter((a) => a.connected);
+      const growwAccounts = growwAccRes.data || [];
+
+      const initialGroups = [
+        ...zerodhaAccounts.map((acc) => ({
+          account: { ...acc, broker: 'zerodha' },
+          applications: [],
+          error: null,
+          loading: true,
+        })),
+        ...growwAccounts.map((acc) => ({
+          account: { ...acc, broker: 'groww' },
+          applications: [],
+          error: null,
+          loading: true,
+        })),
+      ];
+
+      setGroups(initialGroups);
+      setLoading(false);
+
+      zerodhaAccounts.forEach((acc) => loadZerodhaAccount(acc));
+      growwAccounts.forEach((acc) => loadGrowwAccount(acc));
     } catch (err) {
       setError(err.message);
-    } finally {
       setLoading(false);
+    }
+  }
+
+  function refreshAccount(accountId) {
+    const group = groups.find((g) => g.account.id === accountId);
+    if (!group) return;
+    updateGroup(accountId, { loading: true, error: null });
+    if (group.account.broker === 'groww') {
+      loadGrowwAccount(group.account);
+    } else {
+      loadZerodhaAccount(group.account);
     }
   }
 
@@ -229,7 +359,7 @@ export default function ApplicationsList({ onGoToAccounts }) {
                     return sortOrder === 'newest' ? -diff : diff;
                   })}
                 hasActiveFilter={hasActiveFilter}
-                onCancelled={load}
+                onCancelled={() => refreshAccount(group.account.id)}
               />
             ))}
           </div>

@@ -15,11 +15,13 @@ export default function ApplyModal({ instrument, onClose, onApplied }) {
     : [{ code: instrument.series || 'IND', description: 'Individual investor' }];
 
   const [accounts, setAccounts] = useState([]);
+  const [growwAccounts, setGrowwAccounts] = useState([]);
   const [upis, setUpis] = useState([]);
   const [applicationGroups, setApplicationGroups] = useState([]);
   const [loadingMeta, setLoadingMeta] = useState(true);
 
   const [selectedAccountIds, setSelectedAccountIds] = useState([]);
+  const [selectedGrowwIds, setSelectedGrowwIds] = useState([]);
   const [investorType, setInvestorType] = useState(investorTypes[0].code);
   const [upiId, setUpiId] = useState('');
   const [bids, setBids] = useState([emptyBid(instrument, investorTypes[0].cutoff_disabled)]);
@@ -28,9 +30,10 @@ export default function ApplyModal({ instrument, onClose, onApplied }) {
   const [loading, setLoading] = useState(false);
 
   useEffect(() => {
-    Promise.all([api.listAccounts(), api.listUpis(), api.getApplications()])
-      .then(([accRes, upiRes, appsRes]) => {
+    Promise.all([api.listAccounts(), api.listGrowwAccounts(), api.listUpis(), api.getApplications()])
+      .then(([accRes, growwRes, upiRes, appsRes]) => {
         setAccounts(accRes.data || []);
+        setGrowwAccounts(growwRes.data || []);
         setUpis(upiRes.data || []);
         setApplicationGroups(appsRes.data || []);
         if (upiRes.data?.length) setUpiId(upiRes.data[0].upi_id);
@@ -43,6 +46,7 @@ export default function ApplyModal({ instrument, onClose, onApplied }) {
   const lotSize = instrument.lot_size || 1;
   const maxBids = instrument.max_bid_count || 1;
   const connectedAccounts = accounts.filter((a) => a.connected);
+  const connectedGrowwAccounts = growwAccounts.filter((a) => a.connected);
 
   function existingApplication(accountId) {
     const group = applicationGroups.find((g) => g.account.id === accountId);
@@ -69,6 +73,10 @@ export default function ApplyModal({ instrument, onClose, onApplied }) {
     setSelectedAccountIds((prev) => (prev.includes(id) ? prev.filter((x) => x !== id) : [...prev, id]));
   }
 
+  function toggleGrowwAccount(id) {
+    setSelectedGrowwIds((prev) => (prev.includes(id) ? prev.filter((x) => x !== id) : [...prev, id]));
+  }
+
   function updateBid(index, patch) {
     setBids((prev) => prev.map((b, i) => (i === index ? { ...b, ...patch } : b)));
   }
@@ -86,7 +94,7 @@ export default function ApplyModal({ instrument, onClose, onApplied }) {
     setError('');
     setResults(null);
 
-    if (selectedAccountIds.length === 0) {
+    if (selectedAccountIds.length === 0 && selectedGrowwIds.length === 0) {
       setError('Select at least one account to apply with');
       return;
     }
@@ -103,19 +111,44 @@ export default function ApplyModal({ instrument, onClose, onApplied }) {
 
     setLoading(true);
     try {
-      const payload = {
-        account_ids: selectedAccountIds,
-        instrument_id: instrument.id,
-        investor_type: investorType,
-        upi_id: upiId,
-        bids: bids.map((b) => {
-          const bid = { quantity: Number(b.quantity), auto_cutoff: b.auto_cutoff };
-          if (!b.auto_cutoff) bid.price = Number(b.price);
-          return bid;
-        }),
-      };
-      const res = await api.apply(payload);
-      setResults(res.data || []);
+      const kiteResultsPromise = selectedAccountIds.length
+        ? api
+            .apply({
+              account_ids: selectedAccountIds,
+              instrument_id: instrument.id,
+              investor_type: investorType,
+              upi_id: upiId,
+              bids: bids.map((b) => {
+                const bid = { quantity: Number(b.quantity), auto_cutoff: b.auto_cutoff };
+                if (!b.auto_cutoff) bid.price = Number(b.price);
+                return bid;
+              }),
+            })
+            .then((res) => res.data || [])
+        : Promise.resolve([]);
+
+      // Groww's apply endpoint takes one account at a time and one bid — use the first bid.
+      const firstBid = bids[0];
+      const growwPrice = firstBid.auto_cutoff ? instrument.cutoff_price : firstBid.price;
+      const growwResultsPromise = Promise.all(
+        selectedGrowwIds.map((accountId) => {
+          const account = growwAccounts.find((a) => a.id === accountId);
+          return api
+            .applyGrowwIpo(accountId, {
+              symbol: instrument.symbol,
+              isin: instrument.isin,
+              quantity: Number(firstBid.quantity),
+              price: Number(growwPrice),
+              upi_id: upiId,
+              cutoff: firstBid.auto_cutoff,
+            })
+            .then(() => ({ account, status: 'success', message: 'Applied' }))
+            .catch((err) => ({ account, status: 'error', message: err.message }));
+        })
+      );
+
+      const [kiteResults, growwResults] = await Promise.all([kiteResultsPromise, growwResultsPromise]);
+      setResults([...kiteResults, ...growwResults]);
       onApplied?.();
     } catch (err) {
       setError(err.message);
@@ -159,7 +192,7 @@ export default function ApplyModal({ instrument, onClose, onApplied }) {
                 </button>
               </div>
             </div>
-          ) : connectedAccounts.length === 0 ? (
+          ) : connectedAccounts.length === 0 && connectedGrowwAccounts.length === 0 ? (
             <div className="empty-state">
               No connected accounts. Connect an account first from the Accounts tab.
             </div>
@@ -182,6 +215,16 @@ export default function ApplyModal({ instrument, onClose, onApplied }) {
                     </label>
                   );
                 })}
+                {connectedGrowwAccounts.map((acc) => (
+                  <label key={`groww-${acc.id}`} className="checkbox-label account-pick">
+                    <input
+                      type="checkbox"
+                      checked={selectedGrowwIds.includes(acc.id)}
+                      onChange={() => toggleGrowwAccount(acc.id)}
+                    />
+                    {acc.label} <span className="muted">(Groww)</span>
+                  </label>
+                ))}
               </div>
 
               <label>
@@ -279,7 +322,7 @@ export default function ApplyModal({ instrument, onClose, onApplied }) {
                   Cancel
                 </button>
                 <button type="submit" disabled={loading || upis.length === 0}>
-                  {loading ? 'Submitting…' : `Apply (${selectedAccountIds.length || 0})`}
+                  {loading ? 'Submitting…' : `Apply (${selectedAccountIds.length + selectedGrowwIds.length})`}
                 </button>
               </div>
             </form>

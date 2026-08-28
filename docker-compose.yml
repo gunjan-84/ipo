@@ -13,6 +13,7 @@ services:
       - PORT=4000
       - ACCOUNTS_ENC_KEY=${ACCOUNTS_ENC_KEY:-ipo-dashboard-dev-secret}
       - REDIS_URL=redis://redis:6379
+      - TZ=Asia/Kolkata
     volumes:
       - ./server/data:/app/data
       - ./server/logs:/app/logs

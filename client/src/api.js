@@ -38,6 +38,7 @@ export const api = {
 
   getInstruments: () => request('/ipo/instruments'),
   getApplications: () => request('/ipo/applications'),
+  getApplicationsForAccount: (accountId) => request(`/accounts/${accountId}/ipo/applications`),
   apply: (payload) => request('/ipo/apply', { method: 'POST', body: JSON.stringify(payload) }),
   cancel: (accountId, appId) => request(`/accounts/${accountId}/ipo/applications/${appId}`, { method: 'DELETE' }),
   checkIpoStatus: ({ name, pan }) =>
@@ -46,6 +47,28 @@ export const api = {
   listRegistryIpos: () => request('/ipo/registry'),
   checkAllotment: (clientId, registrar) =>
     request(`/ipo/allotment?client_id=${encodeURIComponent(clientId)}&registrar=${encodeURIComponent(registrar)}`),
+  checkAllotmentForPan: (panId, clientId, registrar) =>
+    request(
+      `/ipo/allotment/pan/${panId}?client_id=${encodeURIComponent(clientId)}&registrar=${encodeURIComponent(registrar)}`
+    ),
+
+  listGrowwAccounts: () => request('/groww/accounts'),
+  addGrowwAccount: (payload) => request('/groww/accounts', { method: 'POST', body: JSON.stringify(payload) }),
+  updateGrowwAccount: (id, payload) => request(`/groww/accounts/${id}`, { method: 'PUT', body: JSON.stringify(payload) }),
+  deleteGrowwAccount: (id) => request(`/groww/accounts/${id}`, { method: 'DELETE' }),
+  connectGrowwAccount: (id) => request(`/groww/accounts/${id}/connect`, { method: 'POST' }),
+  disconnectGrowwAccount: (id) => request(`/groww/accounts/${id}/disconnect`, { method: 'POST' }),
+  getGrowwOrders: (id) => request(`/groww/accounts/${id}/orders`),
+  growwLoginStart: (payload) => request('/groww/login/start', { method: 'POST', body: JSON.stringify(payload) }),
+  growwLoginOtp: (payload) => request('/groww/login/otp', { method: 'POST', body: JSON.stringify(payload) }),
+  applyGrowwIpo: (accountId, payload) =>
+    request(`/groww/accounts/${accountId}/apply`, { method: 'POST', body: JSON.stringify(payload) }),
+  cancelGrowwOrder: (accountId, orderId, searchId) =>
+    request(
+      `/groww/accounts/${accountId}/orders/${orderId}${searchId ? `?search_id=${encodeURIComponent(searchId)}` : ''}`,
+      { method: 'DELETE' }
+    ),
+
   getIpoPremiums: () => request('/ipo/premiums'),
   getIpoSubscriptionDetail: (slug) => request(`/ipo/subscription?slug=${encodeURIComponent(slug)}`),
 };

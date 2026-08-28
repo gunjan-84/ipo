@@ -3,6 +3,13 @@ import { api } from '../api';
 import SearchableSelect from './SearchableSelect';
 
 function StatusPill({ row }) {
+  if (row.loading) {
+    return (
+      <span className="status-badge status-pill-checking">
+        <span className="spinner" /> Checking…
+      </span>
+    );
+  }
   if (row.error) {
     return <span className="status-badge status-pill-error">Error</span>;
   }
@@ -17,7 +24,9 @@ function StatusPill({ row }) {
 }
 
 // Lower rank sorts first: allotted, then not allotted, then not applied, errors last.
+// Still-loading rows keep their original position instead of jumping around.
 function statusRank(row) {
+  if (row.loading) return -1;
   if (row.error) return 3;
   if (row.not_applied || row.data.length === 0) return 2;
   const shares = Number(row.data[0]?.All_Shares || 0);
@@ -45,6 +54,9 @@ export default function AllotmentCheck({ onGoToPans }) {
       .catch((err) => setLoadError(err.message));
   }, []);
 
+  // Checks each saved PAN independently — the list of PANs to check resolves fast and
+  // renders immediately with a per-PAN loader, then each PAN's allotment result fills in
+  // as its own request completes, instead of waiting for the slowest PAN to check.
   async function handleCheck(e) {
     e.preventDefault();
     setError('');
@@ -52,11 +64,36 @@ export default function AllotmentCheck({ onGoToPans }) {
     setChecking(true);
     try {
       const [registrar, clientId] = selectedKey.split('|');
-      const res = await api.checkAllotment(clientId, registrar);
-      setResults(res.data || []);
+      const pansRes = await api.listPans();
+      const panList = pansRes.data || [];
+      if (panList.length === 0) {
+        throw new Error('No PAN numbers saved yet — add one under PAN Numbers');
+      }
+
+      setResults(
+        panList.map((p) => ({
+          pan_entry: { id: p.id, pan: p.pan, label: p.label || '' },
+          data: [],
+          not_applied: false,
+          error: null,
+          loading: true,
+        }))
+      );
+      setChecking(false);
+
+      panList.forEach(async (p) => {
+        try {
+          const res = await api.checkAllotmentForPan(p.id, clientId, registrar);
+          const row = res.data;
+          setResults((prev) => prev.map((r) => (r.pan_entry.id === p.id ? { ...row, loading: false } : r)));
+        } catch (err) {
+          setResults((prev) =>
+            prev.map((r) => (r.pan_entry.id === p.id ? { ...r, error: err.message, loading: false } : r))
+          );
+        }
+      });
     } catch (err) {
       setError(err.message);
-    } finally {
       setChecking(false);
     }
   }
