@@ -2,6 +2,7 @@ import { useEffect, useMemo, useState } from 'react';
 import { api } from '../api';
 import ApplyModal from './ApplyModal';
 import SubscriptionModal from './SubscriptionModal';
+import IpoAllotmentModal from './IpoAllotmentModal';
 
 const DAY_MS = 86400000;
 const PREMIUM_NOISE_WORDS = new Set(['LIMITED', 'LTD', 'IPO', 'SME', 'INDIA']);
@@ -135,7 +136,7 @@ function IpoListHeader() {
   );
 }
 
-function IpoRow({ instrument: ins, closed, today, onApply, onShowSubscription, premium }) {
+function IpoRow({ instrument: ins, closed, today, onApply, onShowSubscription, onCheckAllotment, premium, registryMatch }) {
   const [expanded, setExpanded] = useState(false);
   const days = closed ? null : daysLeftInfo(ins.end_at, today);
 
@@ -195,10 +196,17 @@ function IpoRow({ instrument: ins, closed, today, onApply, onShowSubscription, p
 
         <div className="ipo-row-col ipo-row-action" onClick={(e) => e.stopPropagation()}>
           {closed ? (
-            <span className="closed-note">
-              {ins.listing_date && new Date(ins.listing_date.split(' ')[0]) > today ? 'Listing on' : 'Listed'}{' '}
-              {fmtDayMonth(ins.listing_date)}
-            </span>
+            <div className="closed-note-stack">
+              {registryMatch && (
+                <button type="button" onClick={() => onCheckAllotment(ins, registryMatch)}>
+                  Check allotment
+                </button>
+              )}
+              <span className="closed-note">
+                {ins.listing_date && new Date(ins.listing_date.split(' ')[0]) > today ? 'Listing on' : 'Listed'}{' '}
+                {fmtDayMonth(ins.listing_date)}
+              </span>
+            </div>
           ) : (
             <>
               {premium?.slug ? (
@@ -241,18 +249,25 @@ function IpoRow({ instrument: ins, closed, today, onApply, onShowSubscription, p
 export default function IpoList({ onGoToAccounts }) {
   const [instruments, setInstruments] = useState([]);
   const [premiums, setPremiums] = useState([]);
+  const [registryIpos, setRegistryIpos] = useState([]);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState('');
   const [typeFilter, setTypeFilter] = useState('all');
   const [sortOrder, setSortOrder] = useState('closing-soon');
   const [selected, setSelected] = useState(null);
   const [subscriptionTarget, setSubscriptionTarget] = useState(null);
+  const [allotmentTarget, setAllotmentTarget] = useState(null);
 
   useEffect(() => {
     // Best-effort — GMP/subscription figures are a nice-to-have, not worth failing the page over.
     api
       .getIpoPremiums()
       .then((res) => setPremiums(res.data || []))
+      .catch(() => {});
+    // Best-effort — lets closed issues show a "Check allotment" shortcut when a registrar match exists.
+    api
+      .listRegistryIpos()
+      .then((res) => setRegistryIpos(res.data || []))
       .catch(() => {});
   }, []);
 
@@ -264,6 +279,15 @@ export default function IpoList({ onGoToAccounts }) {
     }
     return map;
   }, [instruments, premiums]);
+
+  const registryMatchByInstrumentId = useMemo(() => {
+    const map = {};
+    for (const ins of instruments) {
+      const match = findPremiumMatch(ins, registryIpos);
+      if (match) map[ins.id] = match;
+    }
+    return map;
+  }, [instruments, registryIpos]);
 
   async function load() {
     setLoading(true);
@@ -378,7 +402,15 @@ export default function IpoList({ onGoToAccounts }) {
                 closed
                 today={today}
                 onApply={setSelected}
+                onCheckAllotment={(instrument, match) =>
+                  setAllotmentTarget({
+                    name: instrument.name?.trim() || instrument.symbol,
+                    registrar: match.registrar,
+                    clientId: match.value,
+                  })
+                }
                 premium={premiumByInstrumentId[ins.id]}
+                registryMatch={registryMatchByInstrumentId[ins.id]}
               />
             ))}
           </div>
@@ -400,6 +432,15 @@ export default function IpoList({ onGoToAccounts }) {
           instrument={subscriptionTarget.instrument}
           slug={subscriptionTarget.slug}
           onClose={() => setSubscriptionTarget(null)}
+        />
+      )}
+
+      {allotmentTarget && (
+        <IpoAllotmentModal
+          instrumentName={allotmentTarget.name}
+          registrar={allotmentTarget.registrar}
+          clientId={allotmentTarget.clientId}
+          onClose={() => setAllotmentTarget(null)}
         />
       )}
     </div>

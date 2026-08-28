@@ -585,7 +585,7 @@ a.secondary-btn:hover {
 }
 
 .ipo-row-price {
-  flex: 1;
+  flex: 0.8;
   text-align: right;
   color: var(--text-h);
   font-size: 14px;
@@ -642,7 +642,7 @@ a.secondary-btn:hover {
 
 .ipo-row-action {
   flex: 0 0 auto;
-  width: 190px;
+  width: 220px;
   margin-left: auto;
   display: flex;
   align-items: center;
@@ -667,6 +667,13 @@ button.ipo-row-details {
 
 .ipo-row-details:hover {
   color: var(--accent);
+}
+
+.closed-note-stack {
+  display: flex;
+  flex-direction: column;
+  align-items: flex-end;
+  gap: 4px;
 }
 
 .closed-note {
