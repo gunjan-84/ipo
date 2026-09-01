@@ -13,6 +13,7 @@ import accounts_store
 import auth_store
 import connections_store
 import bigshare_store
+import cameo_store
 import groww_bids_store
 import groww_client
 import groww_login
@@ -612,6 +613,7 @@ async def list_kfintech_ipos():
 REGISTRAR_KFINTECH = "1"
 REGISTRAR_MUFG = "2"
 REGISTRAR_BIGSHARE = "3"
+REGISTRAR_CAMEO = "4"
 
 
 async def query_registrar_status(registrar: str, client_id: str, pan: str) -> dict:
@@ -621,6 +623,8 @@ async def query_registrar_status(registrar: str, client_id: str, pan: str) -> di
         return await query_kfintech_status(client_id, pan)
     if registrar == REGISTRAR_BIGSHARE:
         return await bigshare_store.query_status(client_id, pan)
+    if registrar == REGISTRAR_CAMEO:
+        return await cameo_store.query_status(client_id, pan)
     return {"rows": [], "not_applied": False, "error": "Unknown registrar"}
 
 
@@ -640,6 +644,11 @@ async def list_registry():
         entries += [{**e, "registrar": REGISTRAR_BIGSHARE} for e in bigshare_entries]
     except Exception as err:
         log.warning(f"failed to fetch Bigshare IPO list: {err}")
+    try:
+        cameo_entries = await cameo_store.fetch_entries()
+        entries += [{**e, "registrar": REGISTRAR_CAMEO} for e in cameo_entries]
+    except Exception as err:
+        log.warning(f"failed to fetch Cameo IPO list: {err}")
     entries.sort(key=lambda e: e["name"])
     return {"status": "success", "data": entries}
 
