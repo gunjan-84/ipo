@@ -321,7 +321,8 @@ export default function IpoList({ onGoToAccounts }) {
 
   const bySort = (a, b) => {
     const diff = new Date(a.end_at) - new Date(b.end_at);
-    return sortOrder === 'closing-soon' ? diff : -diff;
+    if (diff !== 0) return sortOrder === 'closing-soon' ? diff : -diff;
+    return a.symbol.localeCompare(b.symbol);
   };
   const open = pool.filter((i) => i.status === 'ongoing').sort(bySort);
   const closed = pool.filter((i) => i.status !== 'ongoing').sort((a, b) => new Date(b.end_at) - new Date(a.end_at));

@@ -12,6 +12,7 @@ from fastapi.responses import JSONResponse
 import accounts_store
 import auth_store
 import connections_store
+import bigshare_store
 import groww_bids_store
 import groww_client
 import groww_login
@@ -610,6 +611,7 @@ async def list_kfintech_ipos():
 # so the registrar's identity never has to travel in a URL or request body.
 REGISTRAR_KFINTECH = "1"
 REGISTRAR_MUFG = "2"
+REGISTRAR_BIGSHARE = "3"
 
 
 async def query_registrar_status(registrar: str, client_id: str, pan: str) -> dict:
@@ -617,11 +619,14 @@ async def query_registrar_status(registrar: str, client_id: str, pan: str) -> di
         return await mufg_store.query_status(client_id, pan)
     if registrar == REGISTRAR_KFINTECH:
         return await query_kfintech_status(client_id, pan)
+    if registrar == REGISTRAR_BIGSHARE:
+        return await bigshare_store.query_status(client_id, pan)
     return {"rows": [], "not_applied": False, "error": "Unknown registrar"}
 
 
 # Combined dropdown across every registrar we can check allotment status with —
-# KFintech's full (scraped) history plus MUFG's live list of currently active offerings.
+# KFintech's full (scraped) history plus MUFG's and Bigshare's live lists of currently
+# active offerings.
 @app.get("/api/ipo/registry")
 async def list_registry():
     entries = [{**e, "registrar": REGISTRAR_KFINTECH} for e in kfintech_store.all_entries()]
@@ -630,6 +635,11 @@ async def list_registry():
         entries += [{**e, "registrar": REGISTRAR_MUFG} for e in mufg_entries]
     except Exception as err:
         log.warning(f"failed to fetch MUFG IPO list: {err}")
+    try:
+        bigshare_entries = await bigshare_store.fetch_entries()
+        entries += [{**e, "registrar": REGISTRAR_BIGSHARE} for e in bigshare_entries]
+    except Exception as err:
+        log.warning(f"failed to fetch Bigshare IPO list: {err}")
     entries.sort(key=lambda e: e["name"])
     return {"status": "success", "data": entries}
 
