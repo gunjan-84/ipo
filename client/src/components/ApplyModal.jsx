@@ -313,6 +313,19 @@ export default function ApplyModal({ instrument, onClose, onApplied }) {
                     </div>
                   </div>
                 ))}
+                <div className="bids-total">
+                  <span>Amount payable</span>
+                  <span className="bids-total-value">
+                    ₹
+                    {bids
+                      .reduce((sum, b) => {
+                        const qty = Number(b.quantity) || 0;
+                        const price = Number(b.auto_cutoff ? instrument.cutoff_price : b.price) || 0;
+                        return sum + qty * price;
+                      }, 0)
+                      .toLocaleString('en-IN')}
+                  </span>
+                </div>
               </div>
 
               {error && <div className="error">{error}</div>}

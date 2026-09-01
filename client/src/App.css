@@ -1067,6 +1067,22 @@ button.ipo-row-details {
   gap: 10px;
 }
 
+.bids-total {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  margin-top: 12px;
+  padding-top: 12px;
+  border-top: 1px solid var(--border);
+  font-weight: 600;
+}
+
+.bids-total-value {
+  color: var(--ok);
+  font-size: 16px;
+  font-variant-numeric: tabular-nums;
+}
+
 .checkbox-label {
   flex-direction: row;
   align-items: center;
