@@ -192,6 +192,25 @@ button:hover:not(:disabled) {
   background: var(--accent-hover);
 }
 
+a.primary-btn-link,
+a.primary-btn-link:link,
+a.primary-btn-link:visited {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  background: var(--accent);
+  color: var(--on-accent);
+  border: none;
+  border-radius: 8px;
+  padding: 9px 16px;
+  font-weight: 600;
+  text-decoration: none;
+}
+
+a.primary-btn-link:hover {
+  background: var(--accent-hover);
+}
+
 .secondary-btn,
 a.secondary-btn,
 a.secondary-btn:link,
@@ -488,6 +507,29 @@ a.secondary-btn:hover {
 
 .ipo-row-col {
   min-width: 0;
+}
+
+.upcoming-ipo-row {
+  padding: 18px 0;
+  border-bottom: 1px solid var(--border);
+}
+
+.upcoming-ipo-row:last-child {
+  border-bottom: none;
+}
+
+.upcoming-ipo-row-header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 16px;
+}
+
+.upcoming-ipo-description {
+  margin: 10px 0 0;
+  font-size: 13px;
+  line-height: 1.5;
+  color: var(--text);
 }
 
 .ipo-row-header {
