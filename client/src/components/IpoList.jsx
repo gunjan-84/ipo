@@ -246,10 +246,35 @@ function IpoRow({ instrument: ins, closed, today, onApply, onShowSubscription, o
   );
 }
 
+function UpcomingIpoRow({ entry }) {
+  return (
+    <div className="upcoming-ipo-row">
+      <div className="upcoming-ipo-row-header">
+        <div>
+          <div className="cell-title">{entry.name}</div>
+          <div className="cell-sub">{entry.market || '—'}</div>
+        </div>
+        {entry.slug && (
+          <a
+            href={`https://www.ipoji.com/ipo/${entry.slug}`}
+            target="_blank"
+            rel="noreferrer"
+            className="primary-btn-link"
+          >
+            View
+          </a>
+        )}
+      </div>
+      {entry.description && <p className="upcoming-ipo-description">{entry.description}</p>}
+    </div>
+  );
+}
+
 export default function IpoList({ onGoToAccounts }) {
   const [instruments, setInstruments] = useState([]);
   const [premiums, setPremiums] = useState([]);
   const [registryIpos, setRegistryIpos] = useState([]);
+  const [upcomingIpos, setUpcomingIpos] = useState([]);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState('');
   const [typeFilter, setTypeFilter] = useState('all');
@@ -268,6 +293,11 @@ export default function IpoList({ onGoToAccounts }) {
     api
       .listRegistryIpos()
       .then((res) => setRegistryIpos(res.data || []))
+      .catch(() => {});
+    // Best-effort — not-yet-filed IPOs are purely informational.
+    api
+      .getUpcomingIpos()
+      .then((res) => setUpcomingIpos((res.data || []).sort((a, b) => a.name.localeCompare(b.name))))
       .catch(() => {});
   }, []);
 
@@ -413,6 +443,20 @@ export default function IpoList({ onGoToAccounts }) {
                 premium={premiumByInstrumentId[ins.id]}
                 registryMatch={registryMatchByInstrumentId[ins.id]}
               />
+            ))}
+          </div>
+        </section>
+      )}
+
+      {upcomingIpos.length > 0 && (
+        <section className="ipo-section">
+          <div className="ipo-section-heading">
+            <h2>Upcoming</h2>
+            <span className="ipo-section-count">{upcomingIpos.length}</span>
+          </div>
+          <div className="ipo-list">
+            {upcomingIpos.map((entry) => (
+              <UpcomingIpoRow key={entry.slug || entry.name} entry={entry} />
             ))}
           </div>
         </section>

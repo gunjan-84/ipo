@@ -1,3 +1,4 @@
+import asyncio
 import re
 import time
 from difflib import SequenceMatcher
@@ -7,12 +8,15 @@ from bs4 import BeautifulSoup
 
 URL = "https://www.ipoji.com/"
 DETAIL_URL = "https://www.ipoji.com/ipo/{slug}"
+UPCOMING_URLS = ("https://www.ipoji.com/ipo/upcoming-ipo", "https://www.ipoji.com/sme-ipo/upcoming-ipo")
 _HEADERS = {"User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36"}
 _CACHE_TTL = 300  # seconds — ipoji's GMP/subscription figures don't change fast enough to justify fetching on every page load
 _DETAIL_CACHE_TTL = 60  # subscription is "live" while bidding is open, so refresh more often
+_UPCOMING_CACHE_TTL = 3600  # not-yet-filed IPOs barely change day to day
 
 _cache = {"entries": [], "fetched_at": 0}
 _detail_cache = {}  # slug -> {"data": {...}, "fetched_at": ts}
+_upcoming_cache = {"entries": [], "fetched_at": 0}
 
 _NOISE_WORDS = {"LIMITED", "LTD", "IPO", "SME", "INDIA"}
 
@@ -61,12 +65,18 @@ def _parse(html: str) -> list:
             elif "discount" in lowered:
                 listing_direction = "down"
 
+        badge_el = card.select_one(".ipo-card-market-badge")
+
         href = card.get("data-agent-href", "")
         entries.append(
             {
                 "name": name,
                 "slug": href.rsplit("/", 1)[-1] if href else None,
                 "status": card.get("data-ipo-status"),
+                "market": badge_el.get_text(strip=True) if badge_el else None,
+                "offer_price": stats.get("Offer Price"),
+                "lot_size": stats.get("Lot Size"),
+                "issue_size": stats.get("Issue Size"),
                 "subscription": stats.get("Subscription"),
                 "exp_premium": stats.get("Exp. Premium"),
                 "premium_direction": premium_color,
@@ -91,6 +101,49 @@ async def fetch_entries(force: bool = False) -> list:
     entries = _parse(res.text)
     _cache["entries"] = entries
     _cache["fetched_at"] = now
+    return entries
+
+
+def _parse_description(html: str) -> str | None:
+    soup = BeautifulSoup(html, "html.parser")
+    el = soup.select_one("#aboutCompany")
+    return el.get_text(" ", strip=True) if el else None
+
+
+async def _fetch_description(client: httpx.AsyncClient, slug: str) -> str | None:
+    try:
+        res = await client.get(DETAIL_URL.format(slug=slug), headers=_HEADERS)
+        res.raise_for_status()
+        return _parse_description(res.text)
+    except Exception:
+        return None
+
+
+# IPOs that haven't filed a prospectus yet — no dates, price band or lot size, just a
+# name and (sometimes) an issue-size estimate. Scraped from ipoji's two dedicated
+# "upcoming" listings (mainboard + SME) rather than the homepage, which only teases
+# the first handful. The listing cards themselves carry no description (that only shows
+# up on the homepage's own teaser and each IPO's own detail page), so we fetch each
+# entry's detail page too — fine given this whole list is cached for an hour.
+async def fetch_upcoming_entries(force: bool = False) -> list:
+    now = time.time()
+    if not force and _upcoming_cache["entries"] and now - _upcoming_cache["fetched_at"] < _UPCOMING_CACHE_TTL:
+        return _upcoming_cache["entries"]
+
+    entries = []
+    async with httpx.AsyncClient(timeout=15) as client:
+        for url in UPCOMING_URLS:
+            res = await client.get(url, headers=_HEADERS)
+            res.raise_for_status()
+            entries += _parse(res.text)
+
+        descriptions = await asyncio.gather(*(_fetch_description(client, e["slug"]) for e in entries if e["slug"]))
+    desc_by_slug = dict(zip((e["slug"] for e in entries if e["slug"]), descriptions))
+    for entry in entries:
+        entry["description"] = desc_by_slug.get(entry["slug"])
+
+    _upcoming_cache["entries"] = entries
+    _upcoming_cache["fetched_at"] = now
     return entries
 
 

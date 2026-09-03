@@ -15,6 +15,7 @@ import connections_store
 import bigshare_store
 import cameo_store
 import groww_bids_store
+import ipo_instruments_store
 import groww_client
 import groww_login
 import groww_store
@@ -409,11 +410,19 @@ async def delete_pan(pan_id: str):
 
 
 # --- IPO instruments: account-agnostic, uses any connected account's token ---
-# Tries each connected account in turn, dropping any whose token Kite rejects, until one works.
+# Cached once a day (see ipo_instruments_store) so the "Public issues" list is viewable
+# without any account connected, and repeat page loads within the same day don't need
+# Kite at all. Only a stale-or-missing cache actually needs a connected account to refresh.
 @app.get("/api/ipo/instruments")
 async def get_instruments():
+    cached = ipo_instruments_store.load()
+    if ipo_instruments_store.is_fresh(cached):
+        return cached["body"]
+
     ids = await connections_store.connected_account_ids()
     if not ids:
+        if cached:
+            return cached["body"]
         return JSONResponse(
             status_code=401, content={"status": "error", "message": "Connect at least one account first"}
         )
@@ -429,13 +438,19 @@ async def get_instruments():
                 body = res.json()
                 if await is_auth_error(body, account_id):
                     continue
+                if res.status_code == 200 and body.get("status") == "success":
+                    ipo_instruments_store.save(body)
                 return JSONResponse(status_code=res.status_code, content=body)
+        if cached:
+            return cached["body"]
         return JSONResponse(
             status_code=401,
             content={"status": "error", "message": "Connected account(s) were logged out — reconnect and try again"},
         )
     except Exception as err:
         log.exception("get_instruments failed")
+        if cached:
+            return cached["body"]
         return JSONResponse(status_code=500, content={"status": "error", "message": str(err)})
 
 
@@ -1069,6 +1084,18 @@ async def get_ipo_premiums():
         entries = await ipoji_store.fetch_entries()
     except Exception as err:
         log.warning(f"failed to fetch ipoji premiums: {err}")
+        return {"status": "success", "data": []}
+    return {"status": "success", "data": entries}
+
+
+# IPOs that haven't opened for bidding yet — not tied to a Kite instrument, so this is
+# purely informational (name, expected issue size, market) with no Apply flow.
+@app.get("/api/ipo/upcoming")
+async def get_upcoming_ipos():
+    try:
+        entries = await ipoji_store.fetch_upcoming_entries()
+    except Exception as err:
+        log.warning(f"failed to fetch ipoji upcoming IPOs: {err}")
         return {"status": "success", "data": []}
     return {"status": "success", "data": entries}
 
