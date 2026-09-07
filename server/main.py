@@ -974,6 +974,9 @@ async def get_groww_orders(account_id: str):
     if not account:
         return JSONResponse(status_code=404, content={"status": "error", "message": "Account not found"})
 
+    if not account.get("pin_token"):
+        return JSONResponse(status_code=409, content={"status": "error", "message": "Account not connected"})
+
     try:
         orders, refreshed_pin_token = await _groww_with_recovery(account, groww_client.fetch_orders_with_auto_unlock)
     except Exception as err:

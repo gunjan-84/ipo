@@ -211,7 +211,7 @@ export default function ApplicationsList({ onGoToAccounts }) {
       const [accountsRes, growwAccRes] = await Promise.all([api.listAccounts(), api.listGrowwAccounts()]);
 
       const zerodhaAccounts = (accountsRes.data || []).filter((a) => a.connected);
-      const growwAccounts = growwAccRes.data || [];
+      const growwAccounts = (growwAccRes.data || []).filter((a) => a.connected);
 
       const initialGroups = [
         ...zerodhaAccounts.map((acc) => ({
