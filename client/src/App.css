@@ -509,22 +509,6 @@ a.secondary-btn:hover {
   min-width: 0;
 }
 
-.upcoming-ipo-row {
-  padding: 18px 0;
-  border-bottom: 1px solid var(--border);
-}
-
-.upcoming-ipo-row:last-child {
-  border-bottom: none;
-}
-
-.upcoming-ipo-row-header {
-  display: flex;
-  align-items: center;
-  justify-content: space-between;
-  gap: 16px;
-}
-
 .upcoming-ipo-description {
   margin: 10px 0 0;
   font-size: 13px;

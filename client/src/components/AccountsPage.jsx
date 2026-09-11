@@ -1,13 +1,14 @@
 import { Fragment, useEffect, useState } from 'react';
 import { api } from '../api';
 
-const emptyZerodhaForm = { label: '', user_id: '', password: '', totp_secret: '' };
+const emptyZerodhaForm = { label: '', user_id: '', password: '', totp_secret: '', default_upi_id: '' };
 const emptyGrowwForm = { label: '', email: '', password: '', pin: '' };
-const emptyGrowwEditForm = { label: '', pin: '' };
+const emptyGrowwEditForm = { label: '', pin: '', default_upi_id: '' };
 
 export default function AccountsPage() {
   const [zerodhaAccounts, setZerodhaAccounts] = useState([]);
   const [growwAccounts, setGrowwAccounts] = useState([]);
+  const [upis, setUpis] = useState([]);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState('');
 
@@ -29,9 +30,10 @@ export default function AccountsPage() {
     setLoading(true);
     setError('');
     try {
-      const [accRes, growwRes] = await Promise.all([api.listAccounts(), api.listGrowwAccounts()]);
+      const [accRes, growwRes, upiRes] = await Promise.all([api.listAccounts(), api.listGrowwAccounts(), api.listUpis()]);
       setZerodhaAccounts(accRes.data || []);
       setGrowwAccounts(growwRes.data || []);
+      setUpis(upiRes.data || []);
     } catch (err) {
       setError(err.message);
     } finally {
@@ -80,6 +82,7 @@ export default function AccountsPage() {
         user_id: res.data.user_id,
         password: res.data.password,
         totp_secret: res.data.totp_secret,
+        default_upi_id: account.default_upi_id || '',
       });
       setEditingBroker('zerodha');
       setEditingId(account.id);
@@ -97,7 +100,7 @@ export default function AccountsPage() {
       closeForm();
       return;
     }
-    setGrowwEditForm({ label: account.label, pin: '' });
+    setGrowwEditForm({ label: account.label, pin: '', default_upi_id: account.default_upi_id || '' });
     setEditingBroker('groww');
     setEditingId(account.id);
     setShowForm(true);
@@ -113,6 +116,7 @@ export default function AccountsPage() {
         user_id: zerodhaForm.user_id.trim(),
         password: zerodhaForm.password,
         totp_secret: zerodhaForm.totp_secret.trim(),
+        default_upi_id: zerodhaForm.default_upi_id,
       };
       if (editingId) {
         await api.updateAccount(editingId, payload);
@@ -172,7 +176,7 @@ export default function AccountsPage() {
     setError('');
     setSaving(true);
     try {
-      const payload = { label: growwEditForm.label.trim() };
+      const payload = { label: growwEditForm.label.trim(), default_upi_id: growwEditForm.default_upi_id };
       if (growwEditForm.pin.trim()) payload.pin = growwEditForm.pin.trim();
       await api.updateGrowwAccount(editingId, payload);
       closeForm();
@@ -323,6 +327,21 @@ export default function AccountsPage() {
           <input type="checkbox" checked={reveal} onChange={(e) => setReveal(e.target.checked)} />
           Show password &amp; TOTP secret
         </label>
+        <label>
+          Default UPI ID (optional)
+          <select
+            value={zerodhaForm.default_upi_id}
+            onChange={(e) => setZerodhaForm({ ...zerodhaForm, default_upi_id: e.target.value })}
+          >
+            <option value="">None — pick each time</option>
+            {upis.map((u) => (
+              <option key={u.id} value={u.upi_id}>
+                {u.upi_id}
+                {u.label ? ` (${u.label})` : ''}
+              </option>
+            ))}
+          </select>
+        </label>
         <div className="modal-actions">
           {editingId && (
             <button type="button" className="secondary-btn" onClick={closeForm}>
@@ -456,6 +475,21 @@ export default function AccountsPage() {
             value={growwEditForm.pin}
             onChange={(e) => setGrowwEditForm({ ...growwEditForm, pin: e.target.value.replace(/\D/g, '') })}
           />
+        </label>
+        <label>
+          Default UPI ID (optional)
+          <select
+            value={growwEditForm.default_upi_id}
+            onChange={(e) => setGrowwEditForm({ ...growwEditForm, default_upi_id: e.target.value })}
+          >
+            <option value="">None — pick each time</option>
+            {upis.map((u) => (
+              <option key={u.id} value={u.upi_id}>
+                {u.upi_id}
+                {u.label ? ` (${u.label})` : ''}
+              </option>
+            ))}
+          </select>
         </label>
         <div className="modal-actions">
           <button type="button" className="secondary-btn" onClick={closeForm}>

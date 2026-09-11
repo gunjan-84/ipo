@@ -19,21 +19,33 @@ _UA = "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like
 _ocr = ddddocr.DdddOcr(show_ad=False)
 
 
-# Bigshare's dropdown only ever lists currently active offerings (like MUFG), so we
-# fetch it live on every call rather than keeping a scraped snapshot.
-async def fetch_entries() -> list:
+_entries = []  # [{name, value}] — value is Bigshare's company id for the "Select Company" dropdown
+
+
+def all_entries():
+    return _entries
+
+
+# Bigshare's dropdown only ever lists currently active offerings (like MUFG) — refreshed
+# on app startup and cached in memory, same as the other registrars. Doubles as reducing
+# how often we touch Bigshare at all, given how aggressively it rate-limits (see query_status).
+async def refresh() -> int:
+    global _entries
     async with httpx.AsyncClient(timeout=15, headers={"User-Agent": _UA}) as client:
         res = await client.get(_STATUS_PAGE)
         res.raise_for_status()
     soup = BeautifulSoup(res.text, "html.parser")
     select_tag = soup.find("select", id="ddlCompany")
-    if not select_tag:
-        return []
-    return [
-        {"name": opt.text.strip(), "value": opt.get("value")}
-        for opt in select_tag.find_all("option")
-        if opt.get("value") and opt.text.strip() not in ("", "--Select Company--")
-    ]
+    _entries = (
+        [
+            {"name": opt.text.strip(), "value": opt.get("value")}
+            for opt in select_tag.find_all("option")
+            if opt.get("value") and opt.text.strip() not in ("", "--Select Company--")
+        ]
+        if select_tag
+        else []
+    )
+    return len(_entries)
 
 
 async def _request_with_retry(client: httpx.AsyncClient, method: str, url: str, **kwargs) -> httpx.Response:

@@ -1,5 +1,6 @@
 import { useEffect, useMemo, useState } from 'react';
 import { api } from '../api';
+import { usePersistedState } from '../usePersistedState';
 
 function titleCase(s) {
   return s.replace(/\b\w/g, (c) => c.toUpperCase());
@@ -165,9 +166,9 @@ export default function ApplicationsList({ onGoToAccounts }) {
   const [groups, setGroups] = useState([]);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState('');
-  const [statusFilter, setStatusFilter] = useState('all');
-  const [accountFilter, setAccountFilter] = useState('all');
-  const [sortOrder, setSortOrder] = useState('newest');
+  const [statusFilter, setStatusFilter] = usePersistedState('applications-status-filter', 'all');
+  const [accountFilter, setAccountFilter] = usePersistedState('applications-account-filter', 'all');
+  const [sortOrder, setSortOrder] = usePersistedState('applications-sort-order', 'newest');
 
   // Fetches each account's applications independently — the account list resolves fast
   // and renders immediately with a per-account loader, then each account's applications

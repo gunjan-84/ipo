@@ -21,14 +21,26 @@ def _parse_dataset(xml_str: str) -> list:
     return [{child.tag: (child.text or "") for child in table} for table in root.findall("Table")]
 
 
+_entries = []  # [{name, value}] — value is MUFG's company_id for the "Select IPO" dropdown
+
+
+def all_entries():
+    return _entries
+
+
 # MUFG's dropdown only ever lists currently active offerings (unlike KFintech's full
-# history), so we fetch it live on every call rather than keeping a scraped snapshot.
-async def fetch_entries() -> list:
+# history) — refreshed on app startup and cached in memory rather than hit on every
+# page view, same as the other registrars.
+async def refresh() -> int:
+    global _entries
     async with httpx.AsyncClient(timeout=15) as client:
         res = await client.post(f"{BASE}/GetDetails", json={}, headers=_HEADERS)
         body = res.json()
     rows = _parse_dataset(body.get("d", ""))
-    return [{"name": r.get("companyname", ""), "value": r.get("company_id", "")} for r in rows if r.get("company_id")]
+    _entries = [
+        {"name": r.get("companyname", ""), "value": r.get("company_id", "")} for r in rows if r.get("company_id")
+    ]
+    return len(_entries)
 
 
 async def query_status(client_id: str, pan: str) -> dict:

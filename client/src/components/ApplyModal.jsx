@@ -69,12 +69,28 @@ export default function ApplyModal({ instrument, onClose, onApplied }) {
     setSelectedAccountIds((prev) => prev.filter((id) => !existingApplication(id)));
   }, [investorType, applicationGroups]);
 
+  // Selecting an account whose Accounts-page settings have a default UPI ID pre-fills
+  // it here, saving a manual pick for the common "apply as just this one account" case.
+  function applyDefaultUpi(account) {
+    if (account?.default_upi_id && upis.some((u) => u.upi_id === account.default_upi_id)) {
+      setUpiId(account.default_upi_id);
+    }
+  }
+
   function toggleAccount(id) {
-    setSelectedAccountIds((prev) => (prev.includes(id) ? prev.filter((x) => x !== id) : [...prev, id]));
+    setSelectedAccountIds((prev) => {
+      const adding = !prev.includes(id);
+      if (adding) applyDefaultUpi(accounts.find((a) => a.id === id));
+      return adding ? [...prev, id] : prev.filter((x) => x !== id);
+    });
   }
 
   function toggleGrowwAccount(id) {
-    setSelectedGrowwIds((prev) => (prev.includes(id) ? prev.filter((x) => x !== id) : [...prev, id]));
+    setSelectedGrowwIds((prev) => {
+      const adding = !prev.includes(id);
+      if (adding) applyDefaultUpi(growwAccounts.find((a) => a.id === id));
+      return adding ? [...prev, id] : prev.filter((x) => x !== id);
+    });
   }
 
   function updateBid(index, patch) {

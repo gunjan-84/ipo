@@ -23,6 +23,7 @@ import kfintech_store
 import mufg_store
 import pan_store
 import upi_store
+import zerodha_ipo_store
 from logging_config import log
 from totp_util import generate_totp
 
@@ -82,10 +83,24 @@ async def auth_gate(request: Request, call_next):
     return await call_next(request)
 
 
+async def _refresh_registrar(name: str, refresh):
+    try:
+        count = await refresh()
+        log.info(f"{name} IPO list refreshed: {count} entries")
+    except Exception as err:
+        log.warning(f"{name} IPO list refresh failed, keeping last known list: {err}")
+
+
 @app.on_event("startup")
 async def on_startup():
     await connections_store.client.ping()
     log.info("Connected to Redis")
+
+    await asyncio.gather(
+        _refresh_registrar("KFintech", kfintech_store.refresh),
+        _refresh_registrar("MUFG", mufg_store.refresh),
+        _refresh_registrar("Bigshare", bigshare_store.refresh),
+    )
 
 
 # --- App login (protects every route above) ---
@@ -165,6 +180,7 @@ async def public_account(a: dict) -> dict:
         "user_id": a["user_id"],
         "connected": conn is not None,
         "profile": (conn or {}).get("profile"),
+        "default_upi_id": a.get("default_upi_id"),
     }
 
 
@@ -187,12 +203,15 @@ async def add_account(payload: dict):
             content={"status": "error", "message": "user_id, password and totp_secret are required"},
         )
 
+    default_upi_id = (payload.get("default_upi_id") or "").strip() or None
+
     account = {
         "id": str(uuid.uuid4()),
         "label": (label or user_id).strip(),
         "user_id": user_id.strip(),
         "password": password,
         "totp_secret": totp_secret.replace(" ", ""),
+        "default_upi_id": default_upi_id,
     }
     accounts.append(account)
     accounts_store.save(accounts)
@@ -252,6 +271,8 @@ async def update_account(account_id: str, payload: dict):
         account["password"] = password
     if totp_secret:
         account["totp_secret"] = totp_secret.replace(" ", "")
+    if "default_upi_id" in payload:
+        account["default_upi_id"] = (payload.get("default_upi_id") or "").strip() or None
 
     if credentials_changed:
         await connections_store.delete(account_id)
@@ -409,9 +430,11 @@ async def delete_pan(pan_id: str):
 
 
 # --- IPO instruments: account-agnostic, uses any connected account's token ---
-# Cached once a day (see ipo_instruments_store) so the "Public issues" list is viewable
-# without any account connected, and repeat page loads within the same day don't need
-# Kite at all. Only a stale-or-missing cache actually needs a connected account to refresh.
+# Cached for one day (see ipo_instruments_store) so the "Public issues" list is viewable
+# without any account connected, and repeat page loads within that day don't need Kite
+# at all. Once the cache turns a day old, a connected account is required again to
+# refresh it — this deliberately does NOT fall back to stale data, so the user sees the
+# normal "connect an account" prompt instead of a silently outdated IPO list.
 @app.get("/api/ipo/instruments")
 async def get_instruments():
     cached = ipo_instruments_store.load()
@@ -420,8 +443,6 @@ async def get_instruments():
 
     ids = await connections_store.connected_account_ids()
     if not ids:
-        if cached:
-            return cached["body"]
         return JSONResponse(
             status_code=401, content={"status": "error", "message": "Connect at least one account first"}
         )
@@ -440,16 +461,12 @@ async def get_instruments():
                 if res.status_code == 200 and body.get("status") == "success":
                     ipo_instruments_store.save(body)
                 return JSONResponse(status_code=res.status_code, content=body)
-        if cached:
-            return cached["body"]
         return JSONResponse(
             status_code=401,
             content={"status": "error", "message": "Connected account(s) were logged out — reconnect and try again"},
         )
     except Exception as err:
         log.exception("get_instruments failed")
-        if cached:
-            return cached["body"]
         return JSONResponse(status_code=500, content={"status": "error", "message": str(err)})
 
 
@@ -639,22 +656,14 @@ async def query_registrar_status(registrar: str, client_id: str, pan: str) -> di
     return {"rows": [], "not_applied": False, "error": "Unknown registrar"}
 
 
-# Combined dropdown across every registrar we can check allotment status with —
-# KFintech's full (scraped) history plus MUFG's and Bigshare's live lists of currently
-# active offerings.
+# Combined dropdown across every registrar we can check allotment status with — all three
+# refreshed on startup (see on_startup) and served from memory here rather than hitting
+# any registrar's site on every page view.
 @app.get("/api/ipo/registry")
 async def list_registry():
     entries = [{**e, "registrar": REGISTRAR_KFINTECH} for e in kfintech_store.all_entries()]
-    try:
-        mufg_entries = await mufg_store.fetch_entries()
-        entries += [{**e, "registrar": REGISTRAR_MUFG} for e in mufg_entries]
-    except Exception as err:
-        log.warning(f"failed to fetch MUFG IPO list: {err}")
-    try:
-        bigshare_entries = await bigshare_store.fetch_entries()
-        entries += [{**e, "registrar": REGISTRAR_BIGSHARE} for e in bigshare_entries]
-    except Exception as err:
-        log.warning(f"failed to fetch Bigshare IPO list: {err}")
+    entries += [{**e, "registrar": REGISTRAR_MUFG} for e in mufg_store.all_entries()]
+    entries += [{**e, "registrar": REGISTRAR_BIGSHARE} for e in bigshare_store.all_entries()]
     entries.sort(key=lambda e: e["name"])
     return {"status": "success", "data": entries}
 
@@ -765,7 +774,12 @@ def find_groww_account(account_id: str):
 
 
 def public_groww_account(a: dict) -> dict:
-    return {"id": a["id"], "label": a["label"], "connected": bool(a.get("pin_token"))}
+    return {
+        "id": a["id"],
+        "label": a["label"],
+        "connected": bool(a.get("pin_token")),
+        "default_upi_id": a.get("default_upi_id"),
+    }
 
 
 def _save_groww_login_result(label: str, login_result: dict) -> dict:
@@ -913,6 +927,8 @@ async def update_groww_account(account_id: str, payload: dict):
         account["pin"] = pin.strip()
     if bearer_token or device_id or nkey or pin:
         account["pin_token"] = None  # force a fresh unlock next fetch
+    if "default_upi_id" in payload:
+        account["default_upi_id"] = (payload.get("default_upi_id") or "").strip() or None
 
     groww_store.save(groww_accounts)
     log.info(f"groww account updated: {account['label']} ({account_id})")
@@ -1083,14 +1099,37 @@ async def get_ipo_premiums():
 
 
 # IPOs that haven't opened for bidding yet — not tied to a Kite instrument, so this is
-# purely informational (name, expected issue size, market) with no Apply flow.
+# purely informational (name, dates if known, board, description) with no Apply flow.
+# Zerodha's own IPO page is both the list source and the description source (each entry's
+# own detail page there has an "About <Company>" writeup) — same site the user already
+# applies through, so there's no cross-site name-matching to get wrong for those. GMP
+# (grey market premium) isn't something Zerodha publishes at all though, so that one field
+# still comes from ipoji, matched by fuzzy name — same as the Open/Closed GMP column.
 @app.get("/api/ipo/upcoming")
 async def get_upcoming_ipos():
     try:
-        entries = await ipoji_store.fetch_upcoming_entries()
+        entries = await zerodha_ipo_store.fetch_upcoming_entries()
     except Exception as err:
-        log.warning(f"failed to fetch ipoji upcoming IPOs: {err}")
+        log.warning(f"failed to fetch Zerodha upcoming IPOs: {err}")
         return {"status": "success", "data": []}
+
+    try:
+        ipoji_entries = await ipoji_store.fetch_entries()
+    except Exception as err:
+        log.warning(f"failed to fetch ipoji entries for GMP matching: {err}")
+        ipoji_entries = []
+
+    for entry in entries:
+        match, score = ipoji_store.find_match(entry["name"], ipoji_entries)
+        if not match and entry.get("zerodha_url"):
+            # Zerodha's own "name" field is sometimes just the ticker (e.g. NSE's card
+            # literally says "NSE", not "National Stock Exchange") — too short to fuzzy-match
+            # against ipoji's full company name. The URL slug usually still has the full name.
+            slug_name = entry["zerodha_url"].rstrip("/").rsplit("/", 1)[-1].replace("-", " ")
+            match, score = ipoji_store.find_match(slug_name, ipoji_entries)
+        entry["exp_premium"] = match.get("exp_premium") if match else None
+        entry["premium_direction"] = match.get("premium_direction") if match else None
+
     return {"status": "success", "data": entries}
 
 

@@ -1,8 +1,10 @@
 import { useEffect, useMemo, useState } from 'react';
 import { api } from '../api';
+import { usePersistedState } from '../usePersistedState';
 import ApplyModal from './ApplyModal';
 import SubscriptionModal from './SubscriptionModal';
 import IpoAllotmentModal from './IpoAllotmentModal';
+import UpcomingIpoDetailsModal from './UpcomingIpoDetailsModal';
 
 const DAY_MS = 86400000;
 const PREMIUM_NOISE_WORDS = new Set(['LIMITED', 'LTD', 'IPO', 'SME', 'INDIA']);
@@ -246,26 +248,52 @@ function IpoRow({ instrument: ins, closed, today, onApply, onShowSubscription, o
   );
 }
 
-function UpcomingIpoRow({ entry }) {
+function UpcomingIpoListHeader() {
   return (
-    <div className="upcoming-ipo-row">
-      <div className="upcoming-ipo-row-header">
-        <div>
-          <div className="cell-title">{entry.name}</div>
-          <div className="cell-sub">{entry.market || '—'}</div>
+    <div className="ipo-row ipo-row-header">
+      <div className="ipo-row-col ipo-row-instrument">Instrument</div>
+      <div className="ipo-row-col ipo-row-date">IPO date</div>
+      <div className="ipo-row-col ipo-row-date">Listing date</div>
+      <div className="ipo-row-col ipo-row-price">Price</div>
+      <div className="ipo-row-col ipo-row-gmp">GMP</div>
+    </div>
+  );
+}
+
+function UpcomingIpoRow({ entry, onViewDetails }) {
+  const dateRange =
+    entry.start_date && entry.end_date
+      ? `${fmtDayMonth(entry.start_date)} – ${fmtDayMonth(entry.end_date)}`
+      : 'To be announced';
+  const boardIsSme = entry.board?.toUpperCase() === 'SME';
+
+  return (
+    <div className="ipo-row" onClick={() => onViewDetails(entry)}>
+      <div className="ipo-row-col ipo-row-instrument">
+        <div className="ipo-row-symbol">
+          <span>{entry.symbol}</span>
+          {entry.board && (
+            <span className={`type-tag ${boardIsSme ? 'type-tag-sme' : 'type-tag-ipo'}`}>
+              {boardIsSme ? 'SME' : 'MAIN'}
+            </span>
+          )}
         </div>
-        {entry.slug && (
-          <a
-            href={`https://www.ipoji.com/ipo/${entry.slug}`}
-            target="_blank"
-            rel="noreferrer"
-            className="primary-btn-link"
-          >
-            View
-          </a>
+        <div className="ipo-row-name">{entry.name}</div>
+      </div>
+
+      <div className="ipo-row-col ipo-row-date">{dateRange}</div>
+      <div className="ipo-row-col ipo-row-date">{entry.listing_date || '—'}</div>
+      <div className="ipo-row-col ipo-row-price">{entry.price_range || '—'}</div>
+
+      <div className="ipo-row-col ipo-row-gmp">
+        {entry.exp_premium ? (
+          <div className={`ipo-row-gmp-value ${entry.premium_direction === 'down' ? 'down' : 'up'}`}>
+            {entry.exp_premium}
+          </div>
+        ) : (
+          <div className="ipo-row-gmp-value muted">—</div>
         )}
       </div>
-      {entry.description && <p className="upcoming-ipo-description">{entry.description}</p>}
     </div>
   );
 }
@@ -277,11 +305,12 @@ export default function IpoList({ onGoToAccounts }) {
   const [upcomingIpos, setUpcomingIpos] = useState([]);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState('');
-  const [typeFilter, setTypeFilter] = useState('all');
-  const [sortOrder, setSortOrder] = useState('closing-soon');
+  const [typeFilter, setTypeFilter] = usePersistedState('ipo-type-filter', 'all');
+  const [sortOrder, setSortOrder] = usePersistedState('ipo-sort-order', 'closing-soon');
   const [selected, setSelected] = useState(null);
   const [subscriptionTarget, setSubscriptionTarget] = useState(null);
   const [allotmentTarget, setAllotmentTarget] = useState(null);
+  const [upcomingDetailsTarget, setUpcomingDetailsTarget] = useState(null);
 
   useEffect(() => {
     // Best-effort — GMP/subscription figures are a nice-to-have, not worth failing the page over.
@@ -297,7 +326,15 @@ export default function IpoList({ onGoToAccounts }) {
     // Best-effort — not-yet-filed IPOs are purely informational.
     api
       .getUpcomingIpos()
-      .then((res) => setUpcomingIpos((res.data || []).sort((a, b) => a.name.localeCompare(b.name))))
+      .then((res) =>
+        setUpcomingIpos(
+          (res.data || []).sort((a, b) => {
+            if (a.start_date && b.start_date) return a.start_date.localeCompare(b.start_date) || a.name.localeCompare(b.name);
+            if (a.start_date || b.start_date) return a.start_date ? -1 : 1; // dated ones before "to be announced"
+            return a.name.localeCompare(b.name);
+          })
+        )
+      )
       .catch(() => {});
   }, []);
 
@@ -347,15 +384,28 @@ export default function IpoList({ onGoToAccounts }) {
   }
 
   const today = new Date();
+  const startOfToday = new Date(today.getFullYear(), today.getMonth(), today.getDate());
   const pool = instruments.filter((i) => typeFilter === 'all' || i.sub_type === typeFilter);
+
+  // Kite's own "status" can lag behind reality for up to a day, since /api/ipo/instruments
+  // is now cached for 24h (see server/ipo_instruments_store.py) rather than fetched live on
+  // every load — so an issue that closed yesterday can still say "ongoing" until the next
+  // refresh. Don't trust status alone: also require the closing date hasn't already passed.
+  const isOpen = (i) => i.status === 'ongoing' && new Date(i.end_at) >= startOfToday;
 
   const bySort = (a, b) => {
     const diff = new Date(a.end_at) - new Date(b.end_at);
     if (diff !== 0) return sortOrder === 'closing-soon' ? diff : -diff;
     return a.symbol.localeCompare(b.symbol);
   };
-  const open = pool.filter((i) => i.status === 'ongoing').sort(bySort);
-  const closed = pool.filter((i) => i.status !== 'ongoing').sort((a, b) => new Date(b.end_at) - new Date(a.end_at));
+  const open = pool.filter(isOpen).sort(bySort);
+  const closed = pool.filter((i) => !isOpen(i)).sort((a, b) => new Date(b.end_at) - new Date(a.end_at));
+
+  const upcomingFiltered = upcomingIpos.filter((e) => {
+    if (typeFilter === 'all') return true;
+    const isSme = e.board?.toUpperCase() === 'SME';
+    return typeFilter === 'SME' ? isSme : !isSme;
+  });
 
   const openSummary =
     open.length === 0 ? 'No issues open right now' : `${open.length} ${open.length === 1 ? 'issue' : 'issues'} open`;
@@ -452,13 +502,18 @@ export default function IpoList({ onGoToAccounts }) {
         <section className="ipo-section">
           <div className="ipo-section-heading">
             <h2>Upcoming</h2>
-            <span className="ipo-section-count">{upcomingIpos.length}</span>
+            <span className="ipo-section-count">{upcomingFiltered.length}</span>
           </div>
-          <div className="ipo-list">
-            {upcomingIpos.map((entry) => (
-              <UpcomingIpoRow key={entry.slug || entry.name} entry={entry} />
-            ))}
-          </div>
+          {upcomingFiltered.length === 0 ? (
+            <div className="empty-state">No upcoming issues match this filter.</div>
+          ) : (
+            <div className="ipo-list">
+              <UpcomingIpoListHeader />
+              {upcomingFiltered.map((entry) => (
+                <UpcomingIpoRow key={entry.symbol || entry.name} entry={entry} onViewDetails={setUpcomingDetailsTarget} />
+              ))}
+            </div>
+          )}
         </section>
       )}
 
@@ -487,6 +542,10 @@ export default function IpoList({ onGoToAccounts }) {
           clientId={allotmentTarget.clientId}
           onClose={() => setAllotmentTarget(null)}
         />
+      )}
+
+      {upcomingDetailsTarget && (
+        <UpcomingIpoDetailsModal entry={upcomingDetailsTarget} onClose={() => setUpcomingDetailsTarget(null)} />
       )}
     </div>
   );
