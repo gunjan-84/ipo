@@ -83,6 +83,11 @@ async def auth_gate(request: Request, call_next):
     return await call_next(request)
 
 
+REGISTRAR_REFRESH_INTERVAL_SECONDS = 3 * 60 * 60  # a container can run for days between restarts —
+# without this, a registrar's cached list (see _refresh_registrar) would just go stale in memory
+# until the next restart, same as the MUFG staleness this was added to fix.
+
+
 async def _refresh_registrar(name: str, refresh):
     try:
         count = await refresh()
@@ -91,16 +96,27 @@ async def _refresh_registrar(name: str, refresh):
         log.warning(f"{name} IPO list refresh failed, keeping last known list: {err}")
 
 
-@app.on_event("startup")
-async def on_startup():
-    await connections_store.client.ping()
-    log.info("Connected to Redis")
-
+async def _refresh_all_registrars():
     await asyncio.gather(
         _refresh_registrar("KFintech", kfintech_store.refresh),
         _refresh_registrar("MUFG", mufg_store.refresh),
         _refresh_registrar("Bigshare", bigshare_store.refresh),
     )
+
+
+async def _registrar_refresh_loop():
+    while True:
+        await asyncio.sleep(REGISTRAR_REFRESH_INTERVAL_SECONDS)
+        await _refresh_all_registrars()
+
+
+@app.on_event("startup")
+async def on_startup():
+    await connections_store.client.ping()
+    log.info("Connected to Redis")
+
+    await _refresh_all_registrars()
+    asyncio.create_task(_registrar_refresh_loop())
 
 
 # --- App login (protects every route above) ---
@@ -1096,6 +1112,19 @@ async def get_ipo_premiums():
         log.warning(f"failed to fetch ipoji premiums: {err}")
         return {"status": "success", "data": []}
     return {"status": "success", "data": entries}
+
+
+# Fallback for closed IPOs that no longer appear in ipoji's homepage feed (it only keeps
+# a rolling recent window — see ipoji_store.fetch_entries) — looked up individually, on
+# demand, by guessing that company's own ipoji detail-page URL.
+@app.get("/api/ipo/listing-info")
+async def get_ipo_listing_info(name: str):
+    try:
+        data = await ipoji_store.fetch_listing_info(name)
+    except Exception as err:
+        log.warning(f"failed to fetch ipoji listing info for '{name}': {err}")
+        return {"status": "success", "data": None}
+    return {"status": "success", "data": data}
 
 
 # IPOs that haven't opened for bidding yet — not tied to a Kite instrument, so this is

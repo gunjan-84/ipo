@@ -292,7 +292,9 @@ a.secondary-btn:hover {
   padding: 18px 40px;
   border-bottom: 1px solid var(--border);
   background: var(--surface);
-  position: relative;
+  position: sticky;
+  top: 0;
+  z-index: 20;
 }
 
 .brand {
@@ -681,18 +683,27 @@ a.secondary-btn:hover {
   color: var(--text);
   text-decoration: none;
   white-space: nowrap;
+  padding: 6px 10px;
+  margin: -6px -10px;
+  border-radius: 8px;
 }
 
 button.ipo-row-details {
   background: transparent;
   border: none;
-  padding: 0;
   font-weight: 400;
   cursor: pointer;
 }
 
 .ipo-row-details:hover {
-  color: var(--accent);
+  color: var(--text-h);
+  background: var(--bg);
+}
+
+.ipo-row-details:focus-visible {
+  outline: 1px solid var(--accent);
+  outline-offset: 3px;
+  border-radius: 4px;
 }
 
 .closed-note-stack {
@@ -708,6 +719,7 @@ button.ipo-row-details {
   letter-spacing: 0.06em;
   text-transform: uppercase;
   color: var(--muted);
+  white-space: nowrap;
 }
 
 .ipo-expand-btn {

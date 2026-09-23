@@ -14,9 +14,13 @@ _CACHE_TTL = 300  # seconds — ipoji's GMP/subscription figures don't change fa
 _DETAIL_CACHE_TTL = 60  # subscription is "live" while bidding is open, so refresh more often
 _UPCOMING_CACHE_TTL = 3600  # not-yet-filed IPOs barely change day to day
 
+_LISTING_INFO_CACHE_TTL = 6 * 60 * 60  # a listing price never changes once set — this just
+# caches against repeat lookups (and repeat 404s) for the same company
+
 _cache = {"entries": [], "fetched_at": 0}
 _detail_cache = {}  # slug -> {"data": {...}, "fetched_at": ts}
 _upcoming_cache = {"entries": [], "fetched_at": 0}
+_listing_info_cache = {}  # guessed slug -> {"data": dict | None, "fetched_at": ts}
 
 _NOISE_WORDS = {"LIMITED", "LTD", "IPO", "SME", "INDIA"}
 
@@ -188,6 +192,68 @@ async def fetch_subscription_detail(slug: str, force: bool = False) -> dict | No
 
     data = _parse_subscription_detail(res.text)
     _detail_cache[slug] = {"data": data, "fetched_at": now}
+    return data
+
+
+def guess_slug(name: str) -> str:
+    """Mirrors the client's own ipojiLink() slug guess (see IpoList.jsx) — used as a
+    fallback when an IPO has aged off ipoji's homepage feed (see fetch_entries, which
+    only keeps a rolling recent window) and so has no scraped slug to look up by."""
+    cleaned = re.sub(r"\([^)]*\)", "", name or "")
+    slug = re.sub(r"[^a-z0-9]+", "-", cleaned.lower()).strip("-")
+    return f"{slug}-ipo"
+
+
+def _parse_listing_info(html: str) -> dict | None:
+    soup = BeautifulSoup(html, "html.parser")
+    metrics = {}
+    for m in soup.select(".ipo-gmp-metric"):
+        dt, dd = m.select_one("dt"), m.select_one("dd")
+        if dt and dd:
+            metrics[dt.get_text(strip=True)] = dd.get_text(strip=True)
+
+    list_price_text = metrics.get("Listing price")
+    if not list_price_text:
+        return None
+
+    band_text = metrics.get("Upper price band")
+    listing_direction = None
+    listing_note = f"Listing Price: {list_price_text}"
+    try:
+        list_price = float(re.sub(r"[^\d.]", "", list_price_text))
+        band = float(re.sub(r"[^\d.]", "", band_text)) if band_text else None
+        if band:
+            change_pct = (list_price - band) / band * 100
+            listing_direction = "up" if change_pct >= 0 else "down"
+            word = "Premium" if change_pct >= 0 else "Discount"
+            listing_note = f"Listing Price: {list_price_text} at a {word} of {abs(change_pct):.2f}%"
+    except ValueError:
+        pass
+
+    return {"list_price": list_price_text.lstrip("₹"), "listing_direction": listing_direction, "listing_note": listing_note}
+
+
+# Fallback for IPOs that have already aged off ipoji's homepage feed — fetches that
+# company's own detail page directly via a guessed slug, so listing price/premium still
+# shows for older closed IPOs the homepage no longer teases. Cached per guessed slug
+# (including negative/404 results) since a listing price never changes once set.
+async def fetch_listing_info(name: str, force: bool = False) -> dict | None:
+    slug = guess_slug(name)
+    now = time.time()
+    cached = _listing_info_cache.get(slug)
+    if not force and cached and now - cached["fetched_at"] < _LISTING_INFO_CACHE_TTL:
+        return cached["data"]
+
+    data = None
+    try:
+        async with httpx.AsyncClient(timeout=15) as client:
+            res = await client.get(DETAIL_URL.format(slug=slug), headers=_HEADERS)
+            if res.status_code == 200:
+                data = _parse_listing_info(res.text)
+    except Exception:
+        data = None
+
+    _listing_info_cache[slug] = {"data": data, "fetched_at": now}
     return data
 
 

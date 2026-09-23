@@ -22,6 +22,15 @@ function normalizeIpoName(name) {
 // ipoji's card names don't always match our instrument names exactly (e.g. dropped
 // suffixes), so match on normalized token overlap rather than requiring equality.
 function findPremiumMatch(instrument, premiums) {
+  // ipoji sometimes names a company by its bare ticker once it's actually trading (e.g.
+  // "National Stock Exchange" on Kite becomes just "NSE" on ipoji) — a full-name token
+  // overlap can't find any shared words against that, so try an exact symbol match first.
+  const symbol = (instrument.symbol || '').toUpperCase();
+  if (symbol) {
+    const symbolMatch = premiums.find((p) => (p.name || '').trim().toUpperCase() === symbol);
+    if (symbolMatch) return symbolMatch;
+  }
+
   const target = normalizeIpoName(instrument.name || instrument.symbol);
   if (!target) return null;
   const targetTokens = new Set(target.split(' '));
@@ -140,7 +149,28 @@ function IpoListHeader() {
 
 function IpoRow({ instrument: ins, closed, today, onApply, onShowSubscription, onCheckAllotment, premium, registryMatch }) {
   const [expanded, setExpanded] = useState(false);
+  const [fallbackListing, setFallbackListing] = useState(null);
   const days = closed ? null : daysLeftInfo(ins.end_at, today);
+
+  // ipoji's homepage feed (used for `premium`) only keeps a rolling recent window — once an
+  // IPO ages off it, look up that company's own ipoji detail page directly as a fallback so
+  // "Closed" rows don't just show a blank GMP column forever.
+  useEffect(() => {
+    if (!closed || premium?.list_price || fallbackListing) return;
+    let cancelled = false;
+    api
+      .getIpoListingInfo(ins.name?.trim() || ins.symbol)
+      .then((res) => {
+        if (!cancelled && res.data) setFallbackListing(res.data);
+      })
+      .catch(() => {});
+    return () => {
+      cancelled = true;
+    };
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [closed, premium?.list_price]);
+
+  const effectiveGmp = closed && !premium?.list_price && fallbackListing ? fallbackListing : premium;
 
   return (
     <div className="ipo-row-wrap">
@@ -169,12 +199,12 @@ function IpoRow({ instrument: ins, closed, today, onApply, onShowSubscription, o
         </div>
 
         <div className="ipo-row-col ipo-row-gmp">
-          {closed && premium?.list_price ? (
+          {closed && effectiveGmp?.list_price ? (
             <>
-              <div className={`ipo-row-gmp-value ${premium.listing_direction === 'down' ? 'down' : 'up'}`}>
-                ₹{premium.list_price}
+              <div className={`ipo-row-gmp-value ${effectiveGmp.listing_direction === 'down' ? 'down' : 'up'}`}>
+                ₹{effectiveGmp.list_price}
               </div>
-              <div className="ipo-row-gmp-sub">{listingChangeLabel(premium)}</div>
+              <div className="ipo-row-gmp-sub">{listingChangeLabel(effectiveGmp)}</div>
             </>
           ) : premium?.exp_premium ? (
             <>
@@ -199,10 +229,15 @@ function IpoRow({ instrument: ins, closed, today, onApply, onShowSubscription, o
         <div className="ipo-row-col ipo-row-action" onClick={(e) => e.stopPropagation()}>
           {closed ? (
             <div className="closed-note-stack">
-              {registryMatch && (
+              {registryMatch ? (
                 <button type="button" onClick={() => onCheckAllotment(ins, registryMatch)}>
                   Check allotment
                 </button>
+              ) : (
+                ins.allotment_finalisation_date &&
+                new Date(ins.allotment_finalisation_date) >= new Date(today.getFullYear(), today.getMonth(), today.getDate()) && (
+                  <span className="closed-note">Allotment on {fmtDayMonth(ins.allotment_finalisation_date)}</span>
+                )
               )}
               <span className="closed-note">
                 {ins.listing_date && new Date(ins.listing_date.split(' ')[0]) > today ? 'Listing on' : 'Listed'}{' '}
@@ -224,7 +259,10 @@ function IpoRow({ instrument: ins, closed, today, onApply, onShowSubscription, o
                   Details
                 </a>
               )}
-              <button disabled={ins.status !== 'ongoing' || !ins.active} onClick={() => onApply(ins)}>
+              {/* This button only renders for rows the parent already classified as open by
+                  date (see isOpen in IpoList) — Kite's own "status" field can lag, so it's
+                  not re-checked here; ins.active is a separate real "bidding enabled" flag. */}
+              <button disabled={!ins.active} onClick={() => onApply(ins)}>
                 Apply
               </button>
             </>
@@ -390,8 +428,11 @@ export default function IpoList({ onGoToAccounts }) {
   // Kite's own "status" can lag behind reality for up to a day, since /api/ipo/instruments
   // is now cached for 24h (see server/ipo_instruments_store.py) rather than fetched live on
   // every load — so an issue that closed yesterday can still say "ongoing" until the next
-  // refresh. Don't trust status alone: also require the closing date hasn't already passed.
-  const isOpen = (i) => i.status === 'ongoing' && new Date(i.end_at) >= startOfToday;
+  // refresh, and one that opens tomorrow can still say "ongoing" (or something else) today.
+  // Don't trust status alone: derive open/closed from the actual dates instead. Anything
+  // that hasn't started yet is neither — it belongs in the "Upcoming" section below, not here.
+  const isOpen = (i) => new Date(i.start_at) <= today && new Date(i.end_at) >= startOfToday;
+  const isClosed = (i) => new Date(i.end_at) < startOfToday;
 
   const bySort = (a, b) => {
     const diff = new Date(a.end_at) - new Date(b.end_at);
@@ -399,7 +440,7 @@ export default function IpoList({ onGoToAccounts }) {
     return a.symbol.localeCompare(b.symbol);
   };
   const open = pool.filter(isOpen).sort(bySort);
-  const closed = pool.filter((i) => !isOpen(i)).sort((a, b) => new Date(b.end_at) - new Date(a.end_at));
+  const closed = pool.filter(isClosed).sort((a, b) => new Date(b.end_at) - new Date(a.end_at));
 
   const upcomingFiltered = upcomingIpos.filter((e) => {
     if (typeFilter === 'all') return true;

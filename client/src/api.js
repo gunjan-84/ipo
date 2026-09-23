@@ -70,6 +70,7 @@ export const api = {
     ),
 
   getIpoPremiums: () => request('/ipo/premiums'),
+  getIpoListingInfo: (name) => request(`/ipo/listing-info?name=${encodeURIComponent(name)}`),
   getUpcomingIpos: () => request('/ipo/upcoming'),
   getIpoSubscriptionDetail: (slug) => request(`/ipo/subscription?slug=${encodeURIComponent(slug)}`),
 };
